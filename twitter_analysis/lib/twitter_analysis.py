@@ -41,7 +41,10 @@ class Kudos:
     def calc_mentions_score(self):
         if 'mentions_of_me' not in self.data:
             return 0
-        return 0
+
+        mentioning_users_count = len(self.data['mentions_of_me'])
+        mentions_count = sum(len(mentions) for mentions in self.data['mentions_of_me'])
+        return mentions_count / float(mentioning_users_count)
 
     def calc_retweets_score(self):
         if 'retweets' not in self.data:
