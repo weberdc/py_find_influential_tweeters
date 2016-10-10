@@ -7,7 +7,7 @@ class Options:
         self._init_parser()
 
     def _init_parser(self):
-        usage = 'bin/twitter_analysis -i <tweets_file.json> --verbose'
+        usage = 'bin/py_twitter_analysis -i <tweets_file.json> --verbose'
         self.parser = ArgumentParser(usage=usage)
         self.parser.add_argument('-i',
                                  '--input-file',
