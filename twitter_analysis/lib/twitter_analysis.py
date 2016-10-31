@@ -1,4 +1,5 @@
 import unicodedata
+import operator
 
 
 def get_or(m, k, v):
@@ -15,15 +16,17 @@ class Kudos:
     """
     Structure to capture kudos of an individual
     data.'quotes'.quoted_tweet_id.[(quoting_user, quote_tweet_id)]
-        .'retweets'.retweeted_tweet_id.[retweeting_user]
+        .'my_retweets'.retweeted_tweet_id.[retweeting_user]
         .'mentions'.mentioning_user.[mentioning_tweet]
         .'replies_to'.original_tweet_id.replying_user_id.[reply_tweet_id]
         .'replies_from'.replying_user_id.[(original_tweet_id, reply_tweet_id)]
         .'favourited'.favourited_tweet_id.count
     """
     def __init__(self):
-        print("new Kudos!")
         self.data = {}
+        self.tweets_db = {}
+
+    def set_tweets(self, tweets_db): self.tweets_db = tweets_db
 
     def rank(self):
         favourited_score = self.calc_favourites_score()
@@ -32,6 +35,32 @@ class Kudos:
         mentions_score = self.calc_mentions_score()
         replies_score = self.calc_replies_score()
         return favourited_score + quotes_score + retweets_score + mentions_score + replies_score
+
+    def h_index(self):
+        if 'my_retweets' not in self.data:
+            return 0
+
+        # sigma = 1  # threshold
+        retweeted_tweets_count = len(self.data['my_retweets'])
+        unique_retweeters = set()
+        for retweeters in self.data['my_retweets']:
+            unique_retweeters = unique_retweeters.union(self.data['my_retweets'][retweeters])
+        retweets_to_retweeters_ratio = len(unique_retweeters) / float(retweeted_tweets_count)
+
+        # turn the retweets into a list of tuples (tweet_id, list of tweeters)
+        sorted_retweets_list = sorted(self.data['my_retweets'].items(), key=operator.itemgetter(1))
+
+        h_index = 0
+        i = len(sorted_retweets_list) - 1
+        while i >= 0:
+            num_retweeters_for_this_tweet = len(sorted_retweets_list[i][1])
+            # print("num retweeters: %s" % str(sorted_retweets_list[i][1]))
+            if num_retweeters_for_this_tweet < h_index + 1:
+                break
+            h_index += 1
+            i -= 1
+
+        return h_index  # retweets_to_retweeters_ratio
 
     def calc_replies_score(self):
         if 'replies_to' not in self.data:
@@ -47,12 +76,12 @@ class Kudos:
         return mentions_count / float(mentioning_users_count)
 
     def calc_retweets_score(self):
-        if 'retweets' not in self.data:
+        if 'my_retweets' not in self.data:
             return 0
 
-        retweeted_tweets_count = len(self.data['retweets'])
+        retweeted_tweets_count = len(self.data['my_retweets'])
         unique_retweeters = set()
-        for retweeters in self.data['retweets']:
+        for retweeters in self.data['my_retweets']:
             unique_retweeters = unique_retweeters.union(retweeters)
         return len(unique_retweeters) / float(retweeted_tweets_count)
 
@@ -134,6 +163,17 @@ class TwitterAnalysis:
         # user -> Kudos instance(mentions, retweets, quotes)
         kudos = {}
 
+        tweet_db = {}
+        for t in tweets:
+            t_id = t['id_str']
+            tweet_db[t_id] = t
+            if self.is_a_quote(t):
+                quoted_tweet = t['quoted_status']
+                tweet_db[quoted_tweet['id_str']] = quoted_tweet
+            elif self.is_a_retweet(t):
+                retweeted_tweet = t['retweeted_status']
+                tweet_db[retweeted_tweet['id_str']] = retweeted_tweet
+
         def get_kudos(user_id):
             return get_or(kudos, user_id, Kudos())
 
@@ -141,6 +181,7 @@ class TwitterAnalysis:
             tweeting_user = t['user']['screen_name']
             tweet_id = t['id_str']
             tweet_text = make_safe(t['text'])
+            get_kudos(tweeting_user).set_tweets(tweet_db)  # HACK!
             if self.is_favourited(t):
                 get_kudos(tweeting_user).add_favourite(tweet_id)
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
@@ -166,9 +207,17 @@ class TwitterAnalysis:
                         get_kudos(mentioned_sn).add_mention(tweeting_user, tweet_id)
                         self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
 
-        print(len(kudos))
+        print("Detected %d different Twitter users" % len(kudos))
         kudos_list = kudos.items()
+
+        print("Ranked")
         top_ten = sorted(kudos_list, key=lambda row: row[1].rank(), reverse=True)[:20]
         for r in top_ten:
             print("%.4f : @%s" % (r[1].rank(), r[0]))
+
+        print("H-Index")
+        h_index_top_ten = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:20]
+        for r in h_index_top_ten:
+            print("%d : @%s" % (r[1].h_index(), r[0]))
+
         print("Done.")
