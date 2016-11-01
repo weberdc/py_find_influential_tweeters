@@ -22,7 +22,7 @@ class Kudos:
     """
     Structure to capture kudos of an individual
     data.'profile'.{screen_name,followers_count,friends_count,total_tweet_count,corpus_tweet_count}
-        .'quotes'.quoted_tweet_id.[(quoting_user, quote_tweet_id)]
+        .'my_quoted_tweets'.quoted_tweet_id.[(quoting_user, quote_tweet_id)]
         .'my_retweets'.retweeted_tweet_id.[retweeting_user]
         .'mentions_of_me'.mentioning_user.[mentioning_tweet]
         .'replies_to'.original_tweet_id.replying_user_id.[reply_tweet_id]
@@ -35,24 +35,9 @@ class Kudos:
 
     def set_tweets(self, tweets_db): self.tweets_db = tweets_db
 
-    # def rank(self):
-    #     favourited_score = self.calc_favourites_score()
-    #     quotes_score = self.calc_quotes_score()
-    #     retweets_score = self.calc_retweets_score()
-    #     mentions_score = self.calc_mentions_score()
-    #     replies_score = self.calc_replies_score()
-    #     return favourited_score + quotes_score + retweets_score + mentions_score + replies_score
-
     def h_index(self):
         if 'my_retweets' not in self.data:
             return 0
-
-        # sigma = 1  # threshold
-        # retweeted_tweets_count = len(self.data['my_retweets'])
-        # unique_retweeters = set()
-        # for retweeters in self.data['my_retweets']:
-        #     unique_retweeters = unique_retweeters.union(self.data['my_retweets'][retweeters])
-        # retweets_to_retweeters_ratio = len(unique_retweeters) / float(retweeted_tweets_count)
 
         # turn the retweets into a list of tuples (tweet_id, list of tweeters)
         sorted_retweets_list = sorted(self.data['my_retweets'].items(), key=operator.itemgetter(1))
@@ -75,7 +60,6 @@ class Kudos:
                  'mentions_of_me' not in self.data):
             return 0
 
-        # retweeted_tweets_count = len(self.data['my_retweets'])
         unique_retweeters = set()
         if 'my_retweets' in self.data:
             for retweeters in self.data['my_retweets']:
@@ -88,48 +72,26 @@ class Kudos:
 
         followers_count = self.data['profile']['followers_count']
 
-        ir_ratio = (len(unique_retweeters) + unique_mentioners) / float(followers_count) if followers_count else 0
+        return (len(unique_retweeters) + unique_mentioners) / float(followers_count) if followers_count else 0
 
-        return ir_ratio
+    def rm_ratio(self):
+        if 'profile' not in self.data or \
+                ('my_retweets' not in self.data and
+                 'mentions_of_me' not in self.data):
+            return 0
 
-    # def calc_replies_score(self):
-    #     if 'replies_to' not in self.data:
-    #         return 0
-    #     return 0
-    #
-    # def calc_mentions_score(self):
-    #     if 'mentions_of_me' not in self.data:
-    #         return 0
-    #
-    #     mentioning_users_count = len(self.data['mentions_of_me'])
-    #     mentions_count = sum(len(mentions) for mentions in self.data['mentions_of_me'])
-    #     return mentions_count / float(mentioning_users_count)
-    #
-    # def calc_retweets_score(self):
-    #     if 'my_retweets' not in self.data:
-    #         return 0
-    #
-    #     retweeted_tweets_count = len(self.data['my_retweets'])
-    #     unique_retweeters = set()
-    #     for retweeters in self.data['my_retweets']:
-    #         unique_retweeters = unique_retweeters.union(retweeters)
-    #     return len(unique_retweeters) / float(retweeted_tweets_count)
-    #
-    # def calc_quotes_score(self):
-    #     if 'my_tweets_quoted' not in self.data:
-    #         return 0
-    #
-    #     quoters_count = 0
-    #     quotes_count = 0
-    #     for quoted_tweet_info in self.data['my_tweets_quoted']:
-    #         quoters_count += len(set(info[0] for info in quoted_tweet_info))
-    #         quotes_count += len(quoted_tweet_info)
-    #     return quoters_count / float(quotes_count)
-    #
-    # def calc_favourites_score(self):
-    #     if 'favourited' not in self.data:
-    #         return 0
-    #     return sum(self.data['favourited'].values()) / len(self.data['favourited'])
+        retweet_count = len(self.data['my_retweets']) if 'my_retweets' in self.data else 0
+
+        mention_count = 0
+        if 'mentions_of_me' in self.data:
+            for mentioner in self.data['mentions_of_me']:
+                mention_count += len(self.data['mentions_of_me'][mentioner])
+
+        if 'profile' not in self.data:
+            return 0
+        else:
+            tweet_count = self.data['profile']['corpus_tweet_count']
+            return (retweet_count + mention_count) / float(tweet_count)
 
     def update_profile(self, tweet):
         profile = get_or(self.data, 'profile', {})
@@ -138,10 +100,6 @@ class Kudos:
         update_count(profile, 'friends_count', tweet['user']['friends_count'])
         update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
         profile['corpus_tweet_count'] = get_or(profile, 'corpus_tweet_count', 0) + 1
-        # follower_count = get_or(profile, 'follower_count', -1)
-        # profile['follower_count'] = max(follower_count, tweet['user']['followers_count'])
-        # friend_count = get_or(profile, 'friend_count', -1)
-        # profile['friend_count'] = max(friend_count, tweet['user']['friends_count'])
 
     def add_favourite(self, tweet_id):
         faves = get_or(self.data, 'favourited', {})
@@ -149,7 +107,7 @@ class Kudos:
         faves[tweet_id] = fave_count + 1
 
     def add_quote(self, quoter, quoted_tweet_id, quoting_tweet_id):
-        my_tweets_quoted = get_or(self.data, 'my_tweets_quoted', {})
+        my_tweets_quoted = get_or(self.data, 'my_quoted_tweets', {})
         my_tweet_quoted_by = get_or(my_tweets_quoted, quoted_tweet_id, [])
         my_tweet_quoted_by.append((quoter, quoting_tweet_id))
 
@@ -232,7 +190,6 @@ class TwitterAnalysis:
                 quoted_user = t['quoted_status']['user']['screen_name']
                 quoted_tweet_id = t['quoted_status']['id_str']
                 get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, tweet_id)
-                # kudos.add_quote(quoted_user, tweeting_user, tweet_id)
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             if self.is_a_retweet(t):
                 retweeted_user = t['retweeted_status']['user']['screen_name']
@@ -267,12 +224,12 @@ class TwitterAnalysis:
         print("Interactor Ratio")
         ir_top_few = sorted(kudos_list, key=lambda row: row[1].ir_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
-            print("%5.5f : @%s" % (r[1].ir_ratio(), r[0]))
+            print("  %.3f : @%s" % (r[1].ir_ratio(), r[0]))
 
-        # print("Retweet and Mention Ratio")
-        # h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
-        # for r in h_index_top_few:
-        #     print("%d : @%s" % (r[1].h_index(), r[0]))
+        print("Retweet and Mention Ratio")
+        h_index_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
+        for r in h_index_top_few:
+            print("  %.3f : @%s" % (r[1].rm_ratio(), r[0]))
         #
         # print("Mixture Model Ratio ((h + ir + rmr) / 3)")
         # h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
