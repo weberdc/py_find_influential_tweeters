@@ -14,6 +14,18 @@ def update_count(m, k, v):
     m[k] = max(v, get_or(m, k, v))
 
 
+def min_max(l):
+    return min(l), max(l)
+
+
+def normalise(v, min_v, max_v):
+    norm = v / float(max_v)
+    if norm > 1.0:
+        print("normalise(%f, %f, %f)" % (v, min_v, max_v))
+    return norm
+    # return (v - min_v) / float(max_v - min_v)
+
+
 def make_safe(text):
     return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore')
 
@@ -40,70 +52,93 @@ class Kudos:
             'favourited': {}
         }
         self.tweets_db = {}
+        self.cached_h_index = -1
+        self.cached_int_ratio = -1
+        self.cached_rm_ratio = -1
 
     def set_tweets(self, tweets_db): self.tweets_db = tweets_db
 
     def h_index(self):
-        # if 'my_retweets' not in self.data and 'my_quoted_tweets' not in self.data:
-        #     return 0
+        """
+        The H Index of this user based on tweets that are retweeted or quoted, similar to the academic H Index
+        :return: The H Index of this user
+        """
+        if self.cached_h_index != -1:
+            return self.cached_h_index
 
         # turn the retweets & quoted tweets into a list of tuples (tweet_id, list of tweeters)
         interactions = self.data['my_retweets'].items() + self.data['my_quoted_tweets'].items()
 
-        # sorted_retweets_list = sorted(self.data['my_retweets'].items(), key=operator.itemgetter(1))
-        # sorted_quoted_tweets_list = sorted(self.data['my_quoted_tweets'].items(), key=operator.itemgetter(1))
         sorted_interactions_list = sorted(interactions, key=operator.itemgetter(1))
 
         h_index = 0
         i = len(sorted_interactions_list) - 1
         while i >= 0:
             num_interactors_for_this_tweet = len(sorted_interactions_list[i][1])
-            # print("num retweeters: %s" % str(sorted_retweets_list[i][1]))
             if num_interactors_for_this_tweet < h_index + 1:
                 break
             h_index += 1
             i -= 1
 
-        return h_index
+        self.cached_h_index = h_index
+        return self.cached_h_index
 
-    def ir_ratio(self):
-        # if 'profile' not in self.data or \
-        #         ('my_retweets' not in self.data and
-        #          'mentions_of_me' not in self.data):
-        #     return 0
+    def int_ratio(self):
+        """
+        Interactor ratio = (|unique retweeters| + |unique mentioners| + |unique_quoters|) / |followers|
+        :return: The ratio of users interacting with this user to the number of this user's followers
+        """
+        if self.cached_int_ratio != -1:
+            return self.cached_int_ratio
 
         unique_retweeters = set()
         if 'my_retweets' in self.data:
             for retweeters in self.data['my_retweets']:
                 unique_retweeters = unique_retweeters.union(self.data['my_retweets'][retweeters])
 
-        unique_mentioners = len(self.data['mentions_of_me'])  # if 'mentions_of_me' in self.data else 0
+        unique_mentioners = len(self.data['mentions_of_me'])
+
+        unique_quoters = set()
+        if 'my_quoted_tweets' in self.data:
+            for quoted_tweets in self.data['my_quoted_tweets']:
+                unique_quoters.add(quoted_tweets[0])
 
         if 'profile' not in self.data:
             pprint(self.data)
 
         followers_count = get_or(self.data['profile'], 'followers_count', 0)
 
-        return (len(unique_retweeters) + unique_mentioners) / float(followers_count) if followers_count else 0
+        self.cached_int_ratio = \
+            (len(unique_retweeters) + unique_mentioners + len(unique_quoters)) / \
+             float(followers_count) if followers_count else 0
+        return self.cached_int_ratio
 
     def rm_ratio(self):
-        # if 'profile' not in self.data or \
-        #         ('my_retweets' not in self.data and
-        #          'mentions_of_me' not in self.data):
-        #     return 0
+        """
+        The Retweet/Mention ratio: (|tweets retweeted| + |tweets mentioning this user| + |tweeets quoted|) /
+        |tweets posted in the corpus|
+        :return: The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
+        have posted in the current corpus
+        """
+        if self.cached_rm_ratio != -1:
+            return self.cached_rm_ratio
 
         retweet_count = len(self.data['my_retweets']) if 'my_retweets' in self.data else 0
 
         mention_count = 0
-        # if 'mentions_of_me' in self.data:
         for mentioner in self.data['mentions_of_me']:
             mention_count += len(self.data['mentions_of_me'][mentioner])
 
-        # if 'profile' not in self.data:
-        #     return 0
-        # else:
+        quote_count = 0
+        for quoted_tweet in self.data['my_quoted_tweets']:
+            quote_count += len(self.data['my_quoted_tweets'][quoted_tweet])
+
         tweet_count = get_or(self.data['profile'], 'corpus_tweet_count', 0)
-        return (retweet_count + mention_count) / float(tweet_count) if tweet_count else 0
+        self.cached_rm_ratio = (retweet_count + mention_count + quote_count) / float(tweet_count) if tweet_count else 0
+        return self.cached_rm_ratio
+
+    def d_rank(self):
+        return 0
 
     def update_profile(self, tweet):
         profile = get_or(self.data, 'profile', {})
@@ -223,29 +258,43 @@ class TwitterAnalysis:
         kudos_list = kudos.items()
         how_few = 20
 
-        # print("Ranked")
-        # top_few = sorted(kudos_list, key=lambda row: row[1].rank(), reverse=True)[:how_few]
-        # for r in top_few:
-        #     print("%.4f : @%s" % (r[1].rank(), r[0]))
-
         print("H-Index")
         h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
         for r in h_index_top_few:
             print("%5d : @%s" % (r[1].h_index(), r[0]))
 
         print("Interactor Ratio")
-        ir_top_few = sorted(kudos_list, key=lambda row: row[1].ir_ratio(), reverse=True)[:how_few]
+        ir_top_few = sorted(kudos_list, key=lambda row: row[1].int_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
-            print("  %.3f : @%s" % (r[1].ir_ratio(), r[0]))
+            print("  %.2f : @%s" % (r[1].int_ratio(), r[0]))
 
         print("Retweet and Mention Ratio")
         h_index_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
         for r in h_index_top_few:
-            print("  %.3f : @%s" % (r[1].rm_ratio(), r[0]))
-        #
-        # print("Mixture Model Ratio ((h + ir + rmr) / 3)")
-        # h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
-        # for r in h_index_top_few:
-        #     print("%d : @%s" % (r[1].h_index(), r[0]))
+            print("  %.2f : @%s" % (r[1].rm_ratio(), r[0]))
+
+        (min_h_index, max_h_index) = min_max(map(lambda row: row[1].h_index(), kudos_list))
+        (min_ir, max_ir) = min_max(map(lambda row: row[1].int_ratio(), kudos_list))
+        (min_rmr, max_rmr) = min_max(map(lambda row: row[1].rm_ratio(), kudos_list))
+
+        print("Mixture Model Ratio ((h' + ir' + rmr') / 3)")
+        blended_top_few = sorted(kudos_list,
+                                 key=lambda row:
+                                     (normalise(row[1].h_index(), min_h_index, max_h_index) +
+                                      normalise(row[1].int_ratio(), min_ir, max_ir) +
+                                      normalise(row[1].rm_ratio(), min_rmr, max_rmr)) / 3.0,
+                                 reverse=True)[:how_few]
+        for r in blended_top_few:
+            print("  %.2f : @%s" % (
+                (normalise(r[1].h_index(), min_h_index, max_h_index) +
+                 normalise(r[1].int_ratio(), min_ir, max_ir) +
+                 normalise(r[1].rm_ratio(), min_rmr, max_rmr)) / 3.0,
+                r[0]
+            ))
+
+        print("D-Rank")
+        d_rank_top_few = sorted(kudos_list, key=lambda row: row[1].d_rank(), reverse=True)[:how_few]
+        for r in d_rank_top_few:
+            print("  %.2f : @%s" % (r[1].d_rank(), r[0]))
 
         print("Done.")
