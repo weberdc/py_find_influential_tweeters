@@ -30,24 +30,36 @@ class Kudos:
         .'favourited'.favourited_tweet_id.count
     """
     def __init__(self):
-        self.data = {}
+        self.data = {
+            'profile': {},
+            'my_retweets': {},
+            'my_quoted_tweets': {},
+            'mentions_of_me': {},
+            'replies_to': {},
+            'replies_from': {},
+            'favourited': {}
+        }
         self.tweets_db = {}
 
     def set_tweets(self, tweets_db): self.tweets_db = tweets_db
 
     def h_index(self):
-        if 'my_retweets' not in self.data:
-            return 0
+        # if 'my_retweets' not in self.data and 'my_quoted_tweets' not in self.data:
+        #     return 0
 
-        # turn the retweets into a list of tuples (tweet_id, list of tweeters)
-        sorted_retweets_list = sorted(self.data['my_retweets'].items(), key=operator.itemgetter(1))
+        # turn the retweets & quoted tweets into a list of tuples (tweet_id, list of tweeters)
+        interactions = self.data['my_retweets'].items() + self.data['my_quoted_tweets'].items()
+
+        # sorted_retweets_list = sorted(self.data['my_retweets'].items(), key=operator.itemgetter(1))
+        # sorted_quoted_tweets_list = sorted(self.data['my_quoted_tweets'].items(), key=operator.itemgetter(1))
+        sorted_interactions_list = sorted(interactions, key=operator.itemgetter(1))
 
         h_index = 0
-        i = len(sorted_retweets_list) - 1
+        i = len(sorted_interactions_list) - 1
         while i >= 0:
-            num_retweeters_for_this_tweet = len(sorted_retweets_list[i][1])
+            num_interactors_for_this_tweet = len(sorted_interactions_list[i][1])
             # print("num retweeters: %s" % str(sorted_retweets_list[i][1]))
-            if num_retweeters_for_this_tweet < h_index + 1:
+            if num_interactors_for_this_tweet < h_index + 1:
                 break
             h_index += 1
             i -= 1
@@ -55,43 +67,43 @@ class Kudos:
         return h_index
 
     def ir_ratio(self):
-        if 'profile' not in self.data or \
-                ('my_retweets' not in self.data and
-                 'mentions_of_me' not in self.data):
-            return 0
+        # if 'profile' not in self.data or \
+        #         ('my_retweets' not in self.data and
+        #          'mentions_of_me' not in self.data):
+        #     return 0
 
         unique_retweeters = set()
         if 'my_retweets' in self.data:
             for retweeters in self.data['my_retweets']:
                 unique_retweeters = unique_retweeters.union(self.data['my_retweets'][retweeters])
 
-        unique_mentioners = len(self.data['mentions_of_me']) if 'mentions_of_me' in self.data else 0
+        unique_mentioners = len(self.data['mentions_of_me'])  # if 'mentions_of_me' in self.data else 0
 
         if 'profile' not in self.data:
             pprint(self.data)
 
-        followers_count = self.data['profile']['followers_count']
+        followers_count = get_or(self.data['profile'], 'followers_count', 0)
 
         return (len(unique_retweeters) + unique_mentioners) / float(followers_count) if followers_count else 0
 
     def rm_ratio(self):
-        if 'profile' not in self.data or \
-                ('my_retweets' not in self.data and
-                 'mentions_of_me' not in self.data):
-            return 0
+        # if 'profile' not in self.data or \
+        #         ('my_retweets' not in self.data and
+        #          'mentions_of_me' not in self.data):
+        #     return 0
 
         retweet_count = len(self.data['my_retweets']) if 'my_retweets' in self.data else 0
 
         mention_count = 0
-        if 'mentions_of_me' in self.data:
-            for mentioner in self.data['mentions_of_me']:
-                mention_count += len(self.data['mentions_of_me'][mentioner])
+        # if 'mentions_of_me' in self.data:
+        for mentioner in self.data['mentions_of_me']:
+            mention_count += len(self.data['mentions_of_me'][mentioner])
 
-        if 'profile' not in self.data:
-            return 0
-        else:
-            tweet_count = self.data['profile']['corpus_tweet_count']
-            return (retweet_count + mention_count) / float(tweet_count)
+        # if 'profile' not in self.data:
+        #     return 0
+        # else:
+        tweet_count = get_or(self.data['profile'], 'corpus_tweet_count', 0)
+        return (retweet_count + mention_count) / float(tweet_count) if tweet_count else 0
 
     def update_profile(self, tweet):
         profile = get_or(self.data, 'profile', {})
