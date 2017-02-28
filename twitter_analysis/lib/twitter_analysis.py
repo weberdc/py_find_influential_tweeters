@@ -101,7 +101,12 @@ class Kudos:
             for retweeters in self.data['my_retweets']:
                 unique_retweeters = unique_retweeters.union(self.data['my_retweets'][retweeters])
 
-        unique_mentioners = len(self.data['mentions_of_me'])
+        # print("Retweeters of @%s: %s" % (self.data['profile']['screen_name'], unique_retweeters))
+        # pprint("Mentions of @%s: %s" % (self.data['profile']['screen_name'], self.data['mentions_of_me']))
+        # pprint("Replies to of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_to']))
+        # pprint("Replies from of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_from']))
+        unique_mentioners = set().union(self.data['mentions_of_me'].keys()).union(self.data['replies_from'].keys())
+        # print("Mentions of @%s: %s" % (self.data['profile']['screen_name'], unique_mentioners))
 
         unique_quoters = set()
         if 'my_quoted_tweets' in self.data:
@@ -114,7 +119,7 @@ class Kudos:
         followers_count = get_or(self.data['profile'], 'followers_count', 0)
 
         self.cached_int_ratio = \
-            (len(unique_retweeters) + unique_mentioners + len(unique_quoters)) / \
+            (len(set().union(unique_retweeters).union(unique_mentioners).union(unique_quoters))) / \
             float(followers_count) if followers_count else 0
         return self.cached_int_ratio
 
