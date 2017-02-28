@@ -8,13 +8,13 @@ class Options:
 
     def _init_parser(self):
         usage = 'bin/py_twitter_analysis\n' + \
-                '-i|--input-file <tweets_file.json>   : File of tweets, one per line\n' +\
-                '[-m|--metrics]                       : Calculate interaction metrics\n' + \
-                '[-d|--d-rank]                        : Calculate Duan-Rank values\n' + \
-                '[-x|--max-iterations <max loops>]    : D-rank iteration roof value (default: 20)\n' +\
-                '[-w|--weight <weight factor value>]  : D-rank weighting factor (default: 0.2)' + \
-                '[-c|--count <tweet_count_limit>]     : Only consider up to this many tweets (default: -1, all)\n' + \
-                '[-v|--verbose]                       : Verbose debugging flag\n'
+                '    -i|--input-file <tweets_file.json>  : File of tweets, one per line\n' +\
+                '    [-m|--metrics]                      : Calculate interaction metrics\n' + \
+                '    [-d|--d-rank]                       : Calculate Duan-Rank values\n' + \
+                '    [-x|--max-iterations <max loops>]   : D-rank iteration roof value (default: 20)\n' +\
+                '    [-w|--weight <weight factor value>] : D-rank weighting factor (default: 0.2)' + \
+                '    [-c|--count <tweet_count_limit>]    : Only consider up to this many tweets (default: -1, all)\n' + \
+                '    [-v|--verbose]                      : Verbose debugging flag\n'
 
         self.parser = ArgumentParser(usage=usage)
         self.parser.add_argument('-i',
