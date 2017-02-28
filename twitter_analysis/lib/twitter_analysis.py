@@ -307,7 +307,11 @@ class TwitterAnalysis:
             ))
 
         print("D-Rank")
-        self.d_rank(kudos, tweet_db.values(), int(self.options.tweet_count), self.options.debug)
+        self.d_rank(kudos,
+                    tweet_db.values(),
+                    int(self.options.max_iterations),
+                    int(self.options.tweet_count),
+                    float(self.options.d_rank_weight_factor))
         d_rank_top_few = sorted(kudos_list, key=lambda row: row[1].get_d_rank(), reverse=True)[:how_few]
         for r in d_rank_top_few:
             print("  %.2f : @%s" % (r[1].get_d_rank(), r[0]))
@@ -342,59 +346,67 @@ class TwitterAnalysis:
                     pprint(outgoing)
 
     @staticmethod
-    def d_rank(kudos_map, tweets, tweet_count=-1, debug=False):
-        initial_weight = 0.2
-        damping_factor = 1 - initial_weight
+    def d_rank(kudos_map, tweets, max_iterations, tweet_count, weight_factor=0.2):
+        # weight_factor = 0.2
+        damping_factor = 1 - weight_factor
         interesting_delta = 0.001
-        d_weights = {}
+        influence_scores = {}
         users = kudos_map.keys()
-        receiving_users = {}
-        interacting_users = {}
+        users_who_mentioned_x = {}  # to collect users who mentioned X (the key)
+        users_mentioned_by_x = {}  # to collect users mentioned by X (the key)
 
         tweets_to_consider = tweets if tweet_count == -1 else tweets[0:tweet_count]
         print("Tweets to consider: %d" % len(tweets_to_consider))
-        TwitterAnalysis.gather_interactions(tweets_to_consider, receiving_users, interacting_users)
-
-        def any_weights_have_changed(weight_diffs):
-            # weight_diffs is a list of two element tuples, if the values in any tuples are different, return true
-            i = 0
-            for user in weight_diffs.keys():
-                pair = weight_diffs[user]
-                if math.fabs(pair[0] - pair[1]) > interesting_delta:
-                    if debug:
-                        pprint("[@%s] diff weights: %.2f %.2f" % (user, pair[0], pair[1]))
-                    return True
-                i += 1
-            return False
+        TwitterAnalysis.gather_interactions(tweets_to_consider, users_who_mentioned_x, users_mentioned_by_x)
 
         # Step 1. Set all weights
         for screen_name in users:
-            k = kudos_map[screen_name]
-            if debug:
-                pprint("@%s %s" % (screen_name, k.data['profile']))
-            d_weights[screen_name] = (0.0, damping_factor)  # prev weight, new weight
+            # k = kudos_map[screen_name]
+            # if debug and False:
+            #     pprint("@%s %s" % (screen_name, k.data['profile']))
+            influence_scores[screen_name] = weight_factor
 
-        # Steps 2
-        while any_weights_have_changed(d_weights):
+        def p(sn, msg):
+            if "ProfBrianCox" in sn:
+                print(msg)
+
+        # Step 2
+        iterations = 0
+        scores_have_changed = True
+        while iterations < max_iterations and scores_have_changed:
+            scores_have_changed = False
+            iterations += 1
             for screen_name in users:
-                # move new_weight to prev_weight slot
-                prev_weight = d_weights[screen_name][1]
+                # grab the previous new_score and call it prev_score
+                prev_score = influence_scores[screen_name]
+                p(screen_name, "prev weight: %.2f" % prev_score)
 
-                # calculate the next new_weight
+                # calculate the next new_score
+                # how many people received a mention or RT from this user?
+                outgoing_interactions = len(get_or(users_mentioned_by_x, screen_name, []))
+                # if it was zero, make it non-zero but less than 1 (it'll be a denominator)
+                if outgoing_interactions == 0:
+                    outgoing_interactions = 0.5
+
+                # print("  inspired users: %s" % get_or(users_who_mentioned_x, screen_name, {}).keys())
                 summation = 0.0
-                outgoing_interactions = len(get_or(interacting_users, screen_name, [1]))
-                if outgoing_interactions:
-                    for inspired_user in get_or(receiving_users, screen_name, {}).keys():
-                        summation += (prev_weight * len(receiving_users[screen_name][inspired_user])) \
-                                     / outgoing_interactions
+                for inspired_user in get_or(users_who_mentioned_x, screen_name, {}).keys():
+                    influence_of_inspired_user = influence_scores[inspired_user]
+                    summation += (influence_of_inspired_user * len(users_who_mentioned_x[screen_name][inspired_user])) \
+                        / outgoing_interactions
+                p(screen_name, "  summation: %.2f" % summation)
 
-                new_weight = damping_factor + initial_weight * summation  # xxx
-                # new_weight = initial_weight * summation  # xxx
+                new_score = damping_factor + weight_factor * summation  # xxx
+                # new_score = weight_factor * summation  # xxx
 
-                d_weights[screen_name] = (prev_weight, new_weight)
+                # Step 3. check
+                if abs(prev_score - new_score) > interesting_delta:
+                    scores_have_changed = True
+
+                influence_scores[screen_name] = new_score
 
         for u in kudos_map.keys():
-            kudos_map[u].set_d_rank(d_weights[u][1])
+            kudos_map[u].set_d_rank(influence_scores[u])
         # i = 0
         # for screen_name in kudos_map.keys():
         #     k = kudos_map[screen_name]
