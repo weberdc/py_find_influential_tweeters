@@ -9,10 +9,12 @@ class Options:
     def _init_parser(self):
         usage = 'bin/py_twitter_analysis\n' + \
                 '-i|--input-file <tweets_file.json>   : File of tweets, one per line\n' +\
-                '[-m|--max-iterations <max loops>]    : D-rank iteration roof value (default: 20)\n' +\
+                '[-m|--metrics]                       : Calculate interaction metrics\n' + \
+                '[-d|--d-rank]                        : Calculate Duan-Rank values\n' + \
+                '[-x|--max-iterations <max loops>]    : D-rank iteration roof value (default: 20)\n' +\
                 '[-w|--weight <weight factor value>]  : D-rank weighting factor (default: 0.2)' + \
                 '[-c|--count <tweet_count_limit>]     : Only consider up to this many tweets (default: -1, all)\n' + \
-                '[-d|--verbose]                       : Verbose debugging flag\n'
+                '[-v|--verbose]                       : Verbose debugging flag\n'
 
         self.parser = ArgumentParser(usage=usage)
         self.parser.add_argument('-i',
@@ -21,6 +23,16 @@ class Options:
                                  dest='tweets_file',
                                  help='A file of tweets, one JSON object per line')
         self.parser.add_argument('-m',
+                                 '--metrics',
+                                 action='store_true',
+                                 dest='calc_metrics',
+                                 help='Calculate and report influence metrics')
+        self.parser.add_argument('-d',
+                                 '--d-rank',
+                                 action='store_true',
+                                 dest='calc_d_rank',
+                                 help='Calculate and report Duan-Rank values')
+        self.parser.add_argument('-x',
                                  '--max-iterations',
                                  default='20',
                                  dest='max_iterations',
@@ -35,7 +47,7 @@ class Options:
                                  default='-1',
                                  dest='tweet_count',
                                  help='Limit the tweets to consider to this many')
-        self.parser.add_argument('-d',
+        self.parser.add_argument('-v',
                                  '--verbose',
                                  action='store_true',
                                  dest='debug',
