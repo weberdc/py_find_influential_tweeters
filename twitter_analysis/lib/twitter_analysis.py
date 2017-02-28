@@ -5,6 +5,11 @@ from pprint import pprint
 
 
 def get_or(m, k, v):
+    """
+    Checks map m for an entry under key k, adding it with value v if it's missing,
+    and then returning the value associated with k.
+    :return The value in map m associated with key k, or v if it wasn't present.
+    """
     if k not in m:
         m[k] = v
     return m[k]
@@ -15,10 +20,12 @@ def update_count(m, k, v):
 
 
 def min_max(l):
+    """Convenience method to return the min and max of a list in one call"""
     return min(l), max(l)
 
 
 def normalise(v, min_v, max_v):
+    """Normalises v between min_v and max_v to belong in (0,1)"""
     # norm = v / float(max_v)  # assumes min_v = 0
     norm = (v - min_v) / float(max_v - min_v)
     if norm > 1.0:
@@ -27,6 +34,7 @@ def normalise(v, min_v, max_v):
 
 
 def make_safe(text):
+    """Replaces whacky characters with safe ones"""
     return unicodedata.normalize('NFKD', text).encode('ascii', 'ignore')
 
 
@@ -51,17 +59,14 @@ class Kudos:
             'replies_from': {},
             'favourited': {}
         }
-        self.tweets_db = {}
         self.cached_h_index = -1
         self.cached_int_ratio = -1
         self.cached_rm_ratio = -1
 
-    def set_tweets(self, tweets_db): self.tweets_db = tweets_db
-
     def h_index(self):
         """
         The H Index of this user based on tweets that are retweeted or quoted, similar to the academic H Index
-        :return: The H Index of this user
+        :return The H Index of this user
         """
         if self.cached_h_index != -1:
             return self.cached_h_index
@@ -86,7 +91,7 @@ class Kudos:
     def int_ratio(self):
         """
         Interactor ratio = (|unique retweeters| + |unique mentioners| + |unique_quoters|) / |followers|
-        :return: The ratio of users interacting with this user to the number of this user's followers
+        :return The ratio of users interacting with this user to the number of this user's followers
         """
         if self.cached_int_ratio != -1:
             return self.cached_int_ratio
@@ -117,7 +122,7 @@ class Kudos:
         """
         The Retweet/Mention ratio: (|tweets retweeted| + |tweets mentioning this user| + |tweeets quoted|) /
         |tweets posted in the corpus|
-        :return: The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
+        :return The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
         have posted in the current corpus
         """
         if self.cached_rm_ratio != -1:
@@ -212,28 +217,24 @@ class TwitterAnalysis:
         kudos = {}
         how_few = 20  # top X to report on
 
-        tweet_db = {}  # fleshed out list of tweets
+        all_tweets = []  # fleshed out list of tweets, including embedded tweets
         for t in tweets:
-            t_id = t['id_str']
-            tweet_db[t_id] = t
+            all_tweets.append(t)
             if self.is_a_quote(t):
-                quoted_tweet = t['quoted_status']
-                tweet_db[quoted_tweet['id_str']] = quoted_tweet
+                all_tweets.append(t['quoted_status'])
             elif self.is_a_retweet(t):
-                retweeted_tweet = t['retweeted_status']
-                tweet_db[retweeted_tweet['id_str']] = retweeted_tweet
+                all_tweets.append(t['retweeted_status'])
 
-        print("Analysing %d tweets..." % len(tweet_db))
+        print("Analysing %d tweets..." % len(all_tweets))
         if self.options.calc_metrics:
             def get_kudos(user_id):
                 return get_or(kudos, user_id, Kudos())
 
             # parse all tweets and build kudos for each user
-            for t in tweet_db.values():
+            for t in all_tweets:
                 tweeting_user = t['user']['screen_name']
                 tweet_id = t['id_str']
                 tweet_text = make_safe(t['text'])
-                get_kudos(tweeting_user).set_tweets(tweet_db)  # HACK!
                 get_kudos(tweeting_user).update_profile(t)
                 if self.is_favourited(t):
                     get_kudos(tweeting_user).add_favourite(tweet_id)
@@ -302,7 +303,7 @@ class TwitterAnalysis:
 
         if self.options.calc_d_rank:
             print("D-Rank")
-            d_rank_scores = self.d_rank(tweet_db.values(),
+            d_rank_scores = self.d_rank(all_tweets,
                                         int(self.options.max_iterations),
                                         int(self.options.tweet_count),
                                         float(self.options.d_rank_weight_factor),
@@ -371,7 +372,6 @@ class TwitterAnalysis:
                 # grab the previous new_score and call it prev_score
                 prev_score = influence_scores[this_user]
 
-                # calculate the next new_score
                 # how many people received a mention or RT from this user?
                 all_outgoing_interactions_of_this_user = len(get_or(users_mentioned_by_x, this_user, []))
                 # if it was zero, make it non-zero but less than 1 (it'll be a denominator)
