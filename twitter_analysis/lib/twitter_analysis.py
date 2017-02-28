@@ -1,5 +1,6 @@
 import unicodedata
 import operator
+import math
 
 from pprint import pprint
 
@@ -51,6 +52,7 @@ class Kudos:
             'replies_from': {},
             'favourited': {}
         }
+        self.d_rank = 0
         self.tweets_db = {}
         self.cached_h_index = -1
         self.cached_int_ratio = -1
@@ -133,12 +135,20 @@ class Kudos:
         for quoted_tweet in self.data['my_quoted_tweets']:
             quote_count += len(self.data['my_quoted_tweets'][quoted_tweet])
 
+        # tweet_count = get_or(self.data['profile'], 'screen_name', 'xxx')
         tweet_count = get_or(self.data['profile'], 'corpus_tweet_count', 0)
         self.cached_rm_ratio = (retweet_count + mention_count + quote_count) / float(tweet_count) if tweet_count else 0
         return self.cached_rm_ratio
 
-    def d_rank(self):
-        return 0
+    def set_d_rank(self, r):
+        self.d_rank = r
+
+    def get_d_rank(self):
+        return self.d_rank
+
+    def update_screen_name(self, screen_name):
+        profile = get_or(self.data, 'profile', {})
+        get_or(profile, 'screen_name', screen_name)
 
     def update_profile(self, tweet):
         profile = get_or(self.data, 'profile', {})
@@ -237,11 +247,13 @@ class TwitterAnalysis:
                 quoted_user = t['quoted_status']['user']['screen_name']
                 quoted_tweet_id = t['quoted_status']['id_str']
                 get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, tweet_id)
+                get_kudos(quoted_user).update_profile(t['quoted_status'])
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             if self.is_a_retweet(t):
                 retweeted_user = t['retweeted_status']['user']['screen_name']
                 original_tweet_id = t['retweeted_status']['id_str']
                 get_kudos(retweeted_user).add_retweet(tweeting_user, original_tweet_id)
+                get_kudos(retweeted_user).update_profile(t['retweeted_status'])
                 self.debug("RETWEET: @%s retweeted by @%s: %s" % (retweeted_user, tweeting_user, tweet_text))
             if self.has_mentions(t):
                 for mentioned_user in t['entities']['user_mentions']:
@@ -249,9 +261,11 @@ class TwitterAnalysis:
                     if mentioned_user['id_str'] == t['in_reply_to_user_id_str']:
                         get_kudos(mentioned_sn) \
                             .add_reply(tweeting_user, t['in_reply_to_status_id_str'], tweet_id)
+                        get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                         self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
                     elif not self.is_a_retweet(t):
                         get_kudos(mentioned_sn).add_mention(tweeting_user, tweet_id)
+                        get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                         self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
 
         print("Detected %d different Twitter users" % len(kudos))
@@ -293,8 +307,98 @@ class TwitterAnalysis:
             ))
 
         print("D-Rank")
-        d_rank_top_few = sorted(kudos_list, key=lambda row: row[1].d_rank(), reverse=True)[:how_few]
+        self.d_rank(kudos, tweet_db.values(), int(self.options.tweet_count), self.options.debug)
+        d_rank_top_few = sorted(kudos_list, key=lambda row: row[1].get_d_rank(), reverse=True)[:how_few]
         for r in d_rank_top_few:
-            print("  %.2f : @%s" % (r[1].d_rank(), r[0]))
+            print("  %.2f : @%s" % (r[1].get_d_rank(), r[0]))
 
         print("Done.")
+
+    @staticmethod
+    def gather_interactions(tweets, incoming, outgoing):
+        # incoming: { receiving_user: { interacting_user : set(tweet ID) } }
+        # outgoing: { interacting_user: set(receiving_user) }
+        for t in tweets:
+            print("@%s : %s" % (t['user']['screen_name'], t['text']))
+            if TwitterAnalysis.is_a_quote(t):
+                quoting_user = t['user']['screen_name']
+                quoted_user = t['quoted_status']['user']['screen_name']
+                incoming_for_the_quoted_user = get_or(incoming, quoted_user, {})
+                get_or(incoming_for_the_quoted_user, quoting_user, set()).add(t['id_str'])
+                get_or(outgoing, quoting_user, set()).add(quoted_user)
+                print("  -Q- @" + quoted_user + " quoted by @" + quoting_user)
+                pprint(incoming)
+                pprint(outgoing)
+            if TwitterAnalysis.has_mentions(t):
+                for mention in t['entities']['user_mentions']:
+                    mentioned_user = mention['screen_name']
+                    mentioning_user = t['user']['screen_name']
+
+                    incoming_for_the_mentioned_user = get_or(incoming, mentioned_user, {})
+                    get_or(incoming_for_the_mentioned_user, mentioning_user, set()).add(t['id_str'])
+                    get_or(outgoing, mentioning_user, set()).add(mentioned_user)
+                    print("  -M- @" + mentioned_user + " mentioned by @" + mentioning_user)
+                    pprint(incoming)
+                    pprint(outgoing)
+
+    @staticmethod
+    def d_rank(kudos_map, tweets, tweet_count=-1, debug=False):
+        initial_weight = 0.2
+        damping_factor = 1 - initial_weight
+        interesting_delta = 0.001
+        d_weights = {}
+        users = kudos_map.keys()
+        receiving_users = {}
+        interacting_users = {}
+
+        tweets_to_consider = tweets if tweet_count == -1 else tweets[0:tweet_count]
+        print("Tweets to consider: %d" % len(tweets_to_consider))
+        TwitterAnalysis.gather_interactions(tweets_to_consider, receiving_users, interacting_users)
+
+        def any_weights_have_changed(weight_diffs):
+            # weight_diffs is a list of two element tuples, if the values in any tuples are different, return true
+            i = 0
+            for user in weight_diffs.keys():
+                pair = weight_diffs[user]
+                if math.fabs(pair[0] - pair[1]) > interesting_delta:
+                    if debug:
+                        pprint("[@%s] diff weights: %.2f %.2f" % (user, pair[0], pair[1]))
+                    return True
+                i += 1
+            return False
+
+        # Step 1. Set all weights
+        for screen_name in users:
+            k = kudos_map[screen_name]
+            if debug:
+                pprint("@%s %s" % (screen_name, k.data['profile']))
+            d_weights[screen_name] = (0.0, damping_factor)  # prev weight, new weight
+
+        # Steps 2
+        while any_weights_have_changed(d_weights):
+            for screen_name in users:
+                # move new_weight to prev_weight slot
+                prev_weight = d_weights[screen_name][1]
+
+                # calculate the next new_weight
+                summation = 0.0
+                outgoing_interactions = len(get_or(interacting_users, screen_name, [1]))
+                if outgoing_interactions:
+                    for inspired_user in get_or(receiving_users, screen_name, {}).keys():
+                        summation += (prev_weight * len(receiving_users[screen_name][inspired_user])) \
+                                     / outgoing_interactions
+
+                new_weight = damping_factor + initial_weight * summation  # xxx
+                # new_weight = initial_weight * summation  # xxx
+
+                d_weights[screen_name] = (prev_weight, new_weight)
+
+        for u in kudos_map.keys():
+            kudos_map[u].set_d_rank(d_weights[u][1])
+        # i = 0
+        # for screen_name in kudos_map.keys():
+        #     k = kudos_map[screen_name]
+        #     print("@%s %s" % (screen_name, k.data['profile']))
+        #     # print(k[0] + " " + k[1].data['profile'])
+        #     k.set_d_rank(float(i))
+        #     i += 1

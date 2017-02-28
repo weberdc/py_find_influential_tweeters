@@ -16,6 +16,6 @@ if __name__ == '__main__':
 
     print("Read %d tweets" % len(tweets))
 
-    v = TwitterAnalysis(opts)
+    analyser = TwitterAnalysis(opts)
 
-    v.analyse(tweets)
+    analyser.analyse(tweets)

@@ -7,7 +7,7 @@ class Options:
         self._init_parser()
 
     def _init_parser(self):
-        usage = 'bin/py_twitter_analysis -i <tweets_file.json> --verbose'
+        usage = 'bin/py_twitter_analysis -i <tweets_file.json> [--verbose] [--count <tweet_count_limit>]'
         self.parser = ArgumentParser(usage=usage)
         self.parser.add_argument('-i',
                                  '--input-file',
@@ -19,6 +19,11 @@ class Options:
                                  action='store_true',
                                  dest='debug',
                                  help='Turns verbose logging on')
+        self.parser.add_argument('-c',
+                                 '--count',
+                                 default='-1',
+                                 dest='tweet_count',
+                                 help='Limit the tweets to consider to this many')
 
     def parse(self, args=None):
         return self.parser.parse_args(args)
