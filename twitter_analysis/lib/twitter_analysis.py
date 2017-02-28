@@ -147,8 +147,13 @@ class Kudos:
         for quoted_tweet in self.data['my_quoted_tweets']:
             quote_count += len(self.data['my_quoted_tweets'][quoted_tweet])
 
-        tweet_count = get_or(self.data['profile'], 'corpus_tweet_count', 0)
-        self.cached_rm_ratio = (retweet_count + mention_count + quote_count) / float(tweet_count) if tweet_count else 0
+        tweet_count = self.get_corpus_tweet_count()
+        # print("Tweet count for @%s is %d" % (self.data['profile']['screen_name'], tweet_count))
+        # print("Retweet count is %d" % retweet_count)
+        # print("Mention count is %d" % mention_count)
+        # print("Quote   count is %d" % quote_count)
+        self.cached_rm_ratio = \
+            (retweet_count + mention_count + quote_count) / float(tweet_count) if tweet_count else 0
         return self.cached_rm_ratio
 
     def update_screen_name(self, screen_name):
@@ -161,7 +166,10 @@ class Kudos:
         update_count(profile, 'followers_count', tweet['user']['followers_count'])
         update_count(profile, 'friends_count', tweet['user']['friends_count'])
         update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
-        profile['corpus_tweet_count'] = get_or(profile, 'corpus_tweet_count', 0) + 1
+        get_or(profile, 'corpus_tweet_count', set()).add(tweet['id_str'])  # unique tweets in corpus
+
+    def get_corpus_tweet_count(self):
+        return len(get_or(self.data['profile'], 'corpus_tweet_count', set()))
 
     def add_favourite(self, tweet_id):
         faves = get_or(self.data, 'favourited', {})
