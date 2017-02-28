@@ -135,9 +135,13 @@ class Kudos:
 
         retweet_count = len(self.data['my_retweets']) if 'my_retweets' in self.data else 0
 
+        # pprint("Replies to of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_to']))
+        # pprint("Replies from of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_from']))
         mention_count = 0
         for mentioner in self.data['mentions_of_me']:
             mention_count += len(self.data['mentions_of_me'][mentioner])
+        for replies in self.data['replies_to']:
+            mention_count += len(self.data['replies_to'][replies])
 
         quote_count = 0
         for quoted_tweet in self.data['my_quoted_tweets']:
