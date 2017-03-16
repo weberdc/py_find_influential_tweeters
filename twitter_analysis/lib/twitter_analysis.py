@@ -391,20 +391,20 @@ class TwitterAnalysis:
                 # grab the previous new_score and call it prev_score
                 prev_score = influence_scores[this_user]
 
-                # how many people received a mention or RT from this user?
-                all_outgoing_interactions_of_this_user = len(get_or(users_mentioned_by_x, this_user, []))
-                # if it was zero, make it non-zero but less than 1 (it'll be a denominator)
-                if all_outgoing_interactions_of_this_user == 0:
-                    all_outgoing_interactions_of_this_user = 0.5
-
                 # calculate surrounding influence, accounting for own interactions (mentions of others)
                 surrounding_influence = 0.0
                 inspired_users = get_or(users_who_mentioned_x, this_user, {}).keys()
                 for inspired_user in inspired_users:
+                    # how many people, in total, received a mention or RT from this inspired user?
+                    all_outgoing_interactions_of_this_inspired_user = \
+                        len(get_or(users_mentioned_by_x, inspired_user, []))
+
                     influence_of_inspired_user = influence_scores[inspired_user]
                     num_interactions_from_inspired_user = len(users_who_mentioned_x[this_user][inspired_user])
-                    surrounding_influence += (influence_of_inspired_user * num_interactions_from_inspired_user)
-                surrounding_influence /= all_outgoing_interactions_of_this_user
+
+                    surrounding_influence += \
+                        (influence_of_inspired_user * num_interactions_from_inspired_user) \
+                        / all_outgoing_interactions_of_this_inspired_user
 
                 # the next score is...
                 new_score = damping_factor + weight_factor * surrounding_influence
@@ -416,6 +416,6 @@ class TwitterAnalysis:
                 influence_scores[this_user] = new_score
 
         if debug and iterations == max_iterations:
-            print("[INFO] D-rank hit iteration max. Could have continued.")
+            print("[INFO] D-rank hit iteration max of %d. Could have continued." % max_iterations)
 
         return influence_scores
