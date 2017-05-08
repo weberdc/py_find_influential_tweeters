@@ -125,7 +125,7 @@ class Kudos:
 
     def rm_ratio(self):
         """
-        The Retweet/Mention ratio: (|tweets retweeted| + |tweets mentioning this user| + |tweeets quoted|) /
+        The Retweet/Mention ratio: (|tweets retweeted| + |tweets mentioning this user| + |tweets quoted|) /
         |tweets posted in the corpus|
         :return The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
         have posted in the current corpus
@@ -133,27 +133,24 @@ class Kudos:
         if self.cached_rm_ratio != -1:
             return self.cached_rm_ratio
 
-        retweet_count = len(self.data['my_retweets']) if 'my_retweets' in self.data else 0
+        # NB in this app, retweets are not simultaneously counted as a mention, so they must
+        # be added in separately, and combined with quotes
+        retweeted_tweet_ids = self.data['my_retweets'].keys()    # which tweets were retweeted?
+        quoted_tweet_ids = self.data['my_quoted_tweets'].keys()  # which tweets were quoted?
+        inspiring_tweets_count = len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
 
-        # pprint("Replies to of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_to']))
-        # pprint("Replies from of @%s: %s" % (self.data['profile']['screen_name'], self.data['replies_from']))
         mention_count = 0
         for mentioner in self.data['mentions_of_me']:
             mention_count += len(self.data['mentions_of_me'][mentioner])
         for replies in self.data['replies_to']:
             mention_count += len(self.data['replies_to'][replies])
 
-        quote_count = 0
-        for quoted_tweet in self.data['my_quoted_tweets']:
-            quote_count += len(self.data['my_quoted_tweets'][quoted_tweet])
-
         tweet_count = self.get_corpus_tweet_count()
         # print("Tweet count for @%s is %d" % (self.data['profile']['screen_name'], tweet_count))
-        # print("Retweet count is %d" % retweet_count)
-        # print("Mention count is %d" % mention_count)
-        # print("Quote   count is %d" % quote_count)
+        # print("Unique inspiring tweets count is %d" % inspiring_tweets_count)
+        # print("Mention count (including replies) is %d" % mention_count)
         self.cached_rm_ratio = \
-            (retweet_count + mention_count + quote_count) / float(tweet_count) if tweet_count else 0
+            (inspiring_tweets_count + mention_count) / float(tweet_count) if tweet_count else 0
         return self.cached_rm_ratio
 
     def update_screen_name(self, screen_name):
@@ -287,17 +284,17 @@ class TwitterAnalysis:
         print("Detected %d different Twitter users" % len(kudos))
         kudos_list = kudos.items()
 
-        print("H-Index")
+        print("H-Index (h)")
         h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
         for r in h_index_top_few:
             print("%5d : @%s" % (r[1].h_index(), r[0]))
 
-        print("Interactor Ratio")
+        print("Interactor Ratio (ir)")
         ir_top_few = sorted(kudos_list, key=lambda row: row[1].int_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
             print("  %.2f : @%s" % (r[1].int_ratio(), r[0]))
 
-        print("Retweet and Mention Ratio")
+        print("Retweet and Mention Ratio (rmr)")
         h_index_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
         for r in h_index_top_few:
             print("  %.2f : @%s" % (r[1].rm_ratio(), r[0]))
@@ -366,11 +363,11 @@ class TwitterAnalysis:
     def d_rank(tweets, max_iterations, tweet_count, weight_factor=0.2, debug=False):
 
         damping_factor = 1 - weight_factor
-        interesting_delta = 0.001  # redo scores if new value differs by this
+        interesting_delta = 0.001   # redo scores if new value differs by this
         influence_scores = {}
         users = set()
         users_who_mentioned_x = {}  # to collect users who mentioned X (the key)
-        users_mentioned_by_x = {}  # to collect users mentioned by X (the key)
+        users_mentioned_by_x = {}   # to collect users mentioned by X (the key)
 
         tweets_to_consider = tweets if tweet_count == -1 else tweets[0:tweet_count]
         if debug:
