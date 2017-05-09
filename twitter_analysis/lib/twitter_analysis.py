@@ -110,16 +110,22 @@ class Kudos:
 
         unique_quoters = set()
         if 'my_quoted_tweets' in self.data:
-            for quoted_tweets in self.data['my_quoted_tweets']:
-                unique_quoters.add(quoted_tweets[0])
+            for quoted_tweet_id in self.data['my_quoted_tweets']:
+                for quotes_of_that_tweet in self.data['my_quoted_tweets'][quoted_tweet_id]:
+                    unique_quoters.add(quotes_of_that_tweet[0])  # value is (user, quoting tweet ID)
 
         if 'profile' not in self.data:
             pprint(self.data)
 
         followers_count = get_or(self.data['profile'], 'followers_count', 0)
 
+        # sn = self.data['profile']['screen_name']
+        # pprint("@%s: unique_retweeters: %s" % (sn, unique_retweeters))
+        # pprint("@%s: unique_mentioners: %s" % (sn, unique_mentioners))
+        # pprint("@%s: unique_quoters:    %s" % (sn, unique_quoters))
+
         self.cached_int_ratio = \
-            (len(set().union(unique_retweeters).union(unique_mentioners).union(unique_quoters))) / \
+            len(set().union(unique_retweeters).union(unique_mentioners).union(unique_quoters)) / \
             float(followers_count) if followers_count else 0
         return self.cached_int_ratio
 
@@ -133,22 +139,37 @@ class Kudos:
         if self.cached_rm_ratio != -1:
             return self.cached_rm_ratio
 
-        # retweeted_tweet_ids = self.data['my_retweets'].keys()    # which tweets were retweeted?
-        # quoted_tweet_ids = self.data['my_quoted_tweets'].keys()  # which tweets were quoted?
-        # inspiring_tweets_count = 0  # len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
+        # print("RMR calc for @%s" % self.data['profile']['screen_name'])
+
+        retweeted_tweet_ids = self.data['my_retweets'].keys()    # which tweets were retweeted?
+        # print("  retweeted_tweet_ids: %s" % retweeted_tweet_ids)
+        quoted_tweet_ids = self.data['my_quoted_tweets'].keys()  # which tweets were quoted?
+        quoting_tweet_ids = set()
+        for quoted_tweet_id in quoted_tweet_ids:
+            for quoted_tweet in self.data['my_quoted_tweets'][quoted_tweet_id]:
+                quoting_tweet_ids.add(quoted_tweet[1])  # value is (quoting user, quoting tweet ID)
+        # print("  quoted_tweet_ids: %s" % self.data['my_quoted_tweets'])
+        inspiring_tweets_count = len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
 
         # NB Relies on the fact we know that every retweet and quote we counted is also counted as a mention
         mention_count = 0
+        # print("  mentions_of_me: %s" % self.data['mentions_of_me'])
         for mentioner in self.data['mentions_of_me']:
             mention_count += len(self.data['mentions_of_me'][mentioner])
+            for quoting_tweet_id in quoting_tweet_ids:  # ignore mentions from quotes (accounted for already)
+                if False and quoting_tweet_id in self.data['mentions_of_me'][mentioner]:
+                    mention_count -= 1
+        # print("  after mentions_of_me, ignoring quotes, mention_count = %d" % mention_count)
         for replies in self.data['replies_to']:
             mention_count += len(self.data['replies_to'][replies])
+        # print("  after replies, mention_count = %d" % mention_count)
 
         tweet_count = self.get_corpus_tweet_count()
         # print("Tweet count for @%s is %d" % (self.data['profile']['screen_name'], tweet_count))
+        # print("  %s" % self.data['profile']['corpus_tweet_set'])
         # print("Unique inspiring tweets count is %d" % inspiring_tweets_count)
         # print("Mention count (including replies) is %d" % mention_count)
-        self.cached_rm_ratio = mention_count / float(tweet_count) if tweet_count else 0
+        self.cached_rm_ratio = (inspiring_tweets_count + mention_count) / float(tweet_count) if tweet_count else 0
 
         return self.cached_rm_ratio
 
@@ -162,10 +183,10 @@ class Kudos:
         update_count(profile, 'followers_count', tweet['user']['followers_count'])
         update_count(profile, 'friends_count', tweet['user']['friends_count'])
         update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
-        get_or(profile, 'corpus_tweet_count', set()).add(tweet['id_str'])  # unique tweets in corpus
+        get_or(profile, 'corpus_tweet_set', set()).add(tweet['id_str'])  # unique tweets in corpus
 
     def get_corpus_tweet_count(self):
-        return len(get_or(self.data['profile'], 'corpus_tweet_count', set()))
+        return len(get_or(self.data['profile'], 'corpus_tweet_set', set()))
 
     def add_favourite(self, tweet_id):
         faves = get_or(self.data, 'favourited', {})
@@ -184,8 +205,8 @@ class Kudos:
 
     def add_mention(self, mentioner, tweet_id):
         mentions_of_me = get_or(self.data, 'mentions_of_me', {})
-        mentions_by = get_or(mentions_of_me, mentioner, [])
-        mentions_by.append(tweet_id)
+        mentions_by = get_or(mentions_of_me, mentioner, set())
+        mentions_by.add(tweet_id)
 
     def add_reply(self, replying_user, original_tweet_id, reply_tweet_id):
         replies_to_me = get_or(self.data, 'replies_to', {})
@@ -235,8 +256,8 @@ class TwitterAnalysis:
             t_id = t['id_str']
             all_tweets[t_id] = t
             if self.is_a_quote(t):
-                quoted_status = t['quoted_status']
-                all_tweets[quoted_status['id_str']] = quoted_status
+                quoting_tweet = t['quoted_status']
+                all_tweets[quoting_tweet['id_str']] = quoting_tweet
             elif self.is_a_retweet(t):
                 retweeted_status = t['retweeted_status']
                 all_tweets[retweeted_status['id_str']] = retweeted_status
@@ -261,22 +282,33 @@ class TwitterAnalysis:
                 get_kudos(tweeting_user).add_favourite(tweet_id)
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
             t_stack = [t]  # stack of tweets, including this and any embedded ones
-            if self.is_a_quote(t):
-                quoted_user = t['quoted_status']['user']['screen_name']
-                quoted_tweet_id = t['quoted_status']['id_str']
-                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, tweet_id)
-                get_kudos(quoted_user).update_profile(t['quoted_status'])
-                # a quoted tweet won't have its user_mentions populated - count it manually
-                get_kudos(quoted_user).add_mention(tweeting_user, tweet_id)
-                t_stack.append(t['quoted_status'])
-                self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
-            if self.is_a_retweet(t):
+            is_a_retweet = self.is_a_retweet(t)
+            if is_a_retweet:
                 retweeted_user = t['retweeted_status']['user']['screen_name']
                 original_tweet_id = t['retweeted_status']['id_str']
                 get_kudos(retweeted_user).add_retweet(tweeting_user, original_tweet_id)
                 get_kudos(retweeted_user).update_profile(t['retweeted_status'])
                 t_stack.append(t['retweeted_status'])
                 self.debug("RETWEET: @%s retweeted by @%s: %s" % (retweeted_user, tweeting_user, tweet_text))
+            if self.is_a_quote(t):
+                # NB, it's possible to have a retweet of a quoted tweet, but not a quote of a retweet (the
+                # quote will be of the original tweet). In the case of a retweeted quote, the quoted_status
+                # field of both the retweeted tweet and the original quoting tweet will be populated with
+                # the quoted tweet, so it's important to distinguish exactly who is quoting whom and who is
+                # just retweeting.
+                #
+                # - If @A retweets @B's quote of @C, then we get @A RETWEETS @B, and @B QUOTES @C.
+                # - If @A quotes @B's retweet of @C, then we get @A quotes @C only.
+                quoting_tweet = t
+                if is_a_retweet:
+                    quoting_tweet = t['retweeted_status']
+
+                quoted_tweet = t['quoted_status']
+                quoted_user = quoted_tweet['user']['screen_name']
+                quoted_tweet_id = quoted_tweet['id_str']
+                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoting_tweet['id_str'])
+                t_stack.append(quoted_tweet)  # quoting_tweet)
+                self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
             if len(t_stack):
                 for _t in t_stack:  # [x for x in t_stack if (self.has_mentions(x))]:
@@ -288,10 +320,12 @@ class TwitterAnalysis:
                             get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                             self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
                         else:
-                            # those mentioned in the retweeted tweet ought to get points
-                            if not (self.is_a_retweet(_t) and
-                                    mentioned_user['id_str'] == _t['retweeted_status']['user']['id_str']):
-                                get_kudos(mentioned_sn).add_mention(tweeting_user, tweet_id)
+                            # those mentioned in the retweeted or quoted tweet ought to get extra points
+                            if (not (self.is_a_retweet(_t) and
+                                     mentioned_user['id_str'] == _t['retweeted_status']['user']['id_str'])) \
+                                and (not (self.is_a_quote(_t) and
+                                          mentioned_user['id_str'] == _t['quoted_status']['user']['id_str'])):
+                                get_kudos(mentioned_sn).add_mention(tweeting_user, _t['id_str'])
                                 get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                                 self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
 

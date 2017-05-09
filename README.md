@@ -70,7 +70,7 @@ User `@H` refers to an URL, and quotes a tweet mentioning another user:
   `https://twitter/A/status/14` which itself mentions screen name `@B`
 
 The expected output based on this set is for user `@A` to have an h-index of 3 (3 tweets each retweeted at
-least 3 times), an interactor ratio of 0.7 (unique users retweeting and mentioning (7) divided by the
+least 3 times), an interactor ratio of 0.6 (unique users retweeting and mentioning (6) divided by the
 number of followers (10)) and a retweet/mention ratio of 1.75 (unique tweets retweeted and/or quoted (3)
 and tweets mentioning (3, including 2 replies) divided by the number of tweets in corpus (4)). `@B`'s
 interactor ratio is 0.2, its retweet/mention ratio is 0.67 (it was mentioned by in a tweet by `@A`, which
