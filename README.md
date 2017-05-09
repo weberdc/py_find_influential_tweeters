@@ -26,55 +26,59 @@ $ bin/py_twitter_analysis
 # Test Data
 In the `data` directory are two test files, one, `qanda-100.json`, has 100 tweets including the `#qanda`
 hashtag collected ABC's Q&A panel discussion from mid-August 2016 (the episode aired on the 15th of
-August 2016). The other, `test.json`, is a hand-crafted set of 18 tweets by eight users, `A`, `B`, `C`,
-`D`, `E`, `F`, `G`, and `H`.
+August 2016). The other, `test.json`, is a hand-crafted set of 19 tweets by eight users, `@A`, `@B`,
+`@C`, `@D`, `@E`, `@F`, `@G`, and `@H`.
 
-User `A` tweets four original tweets:
+User `@A` tweets four original tweets:
 
-* `@A: tweet A1` (ID: `1`, follower count: 10)
-* `@A: tweet A2` (ID: `2`, follower count: 10)
-* `@A: tweet A3` (ID: `3`, follower count: 10)
-* `@A: tweet A4` (ID: `4`, follower count: 10)
+* `@A: tweet A1` (ID: `11`, follower count: 10)
+* `@A: tweet A2` (ID: `12`, follower count: 10)
+* `@A: tweet A3` (ID: `13`, follower count: 10)
+* `@A: tweet A4 @B` (ID: `14`, mentioning: `@B`)
 
-Users `B`, `C`, and `D` all retweet `A`'s first three tweets, resulting in:
+Users `@B`, `@C`, and `@D` all retweet `@A`'s first three tweets, resulting in:
 
-* `@B: RT @A: tweet A1` (ID: `11`)
-* `@B: RT @A: tweet A2` (ID: `12`)
-* `@B: RT @A: tweet A3` (ID: `13`)
-* `@C: RT @A: tweet A1` (ID: `21`)
-* `@C: RT @A: tweet A2` (ID: `22`)
-* `@C: RT @A: tweet A3` (ID: `23`)
-* `@D: RT @A: tweet A1` (ID: `31`)
-* `@D: RT @A: tweet A2` (ID: `32`)
-* `@D: RT @A: tweet A3` (ID: `33`)
+* `@B: RT @A: tweet A1` (ID: `21`)
+* `@B: RT @A: tweet A2` (ID: `22`)
+* `@B: RT @A: tweet A3` (ID: `23`)
+* `@C: RT @A: tweet A1` (ID: `31`)
+* `@C: RT @A: tweet A2` (ID: `32`)
+* `@C: RT @A: tweet A3` (ID: `33`)
+* `@D: RT @A: tweet A1` (ID: `41`)
+* `@D: RT @A: tweet A2` (ID: `42`)
+* `@D: RT @A: tweet A3` (ID: `43`)
 
-User `E` replies to two of `A`'s tweets:
+User `@E` replies to two of `@A`'s tweets:
 
-* `@E: @A IKR (reply to A1)` (ID: `41`, replying to tweet id: `1`)
-* `@E: @A IKR (reply to A2)` (ID: `42`, replying to tweet id: `2`)
+* `@E: @A IKR (reply to @A1)` (ID: `51`, replying to tweet id: `1`)
+* `@E: @A IKR (reply to @A2)` (ID: `52`, replying to tweet id: `2`)
 
-User `F` simply *mention*s `A`:
+User `@F` simply *mention*s `@A`:
 
-* `@F: Tweeting about @A` (ID: `51`, mentions screen name: `A`)
+* `@F: Tweeting about @A` (ID: `61`, mentions screen name: `@A`)
 
-User `G` *quote*s `A`'s first tweet:
+User `@G` *quote*s `@A`'s first tweet:
 
-* `@G: Right on, @A!` (ID: `61`, mentions screen name: `A`, includes URL to tweet `1` and expanded URL
-  `https://twitter.com/A/status/1`)
+* `@G: Right on @A!` (ID: `71`, mentions screen name `@A`, includes URL to tweet `11` and expanded URL
+  `https://twitter.com/A/status/11`)
 
-User `H` refers to an URL, but no other user:
+User `@H` refers to an URL, and quotes a tweet mentioning another user:
 
-* `@H: Look at https://t.co/short` (ID: `71`, includes URL `https://t.co/short` and expanded URL
+* `@H: Look at https://t.co/short` (ID: `81`, includes URL `https://t.co/short` and expanded URL
   `https://some.com/expanded/url`)
+* `@H: Right on @A!` (ID: `91`, mentions screen name `@A`, includes URL to tweet `14` and expanded URL
+  `https://twitter/A/status/14` which itself mentions screen name `@B`
 
-The expected output based on this set is for user `A` to have an h-index of 3 (3 tweets each retweeted at
-least 3 times), an interactor ratio of 0.7 (unique users retweeting and mentioning (7) divided by the
+The expected output based on this set is for user `@A` to have an h-index of 3 (3 tweets each retweeted at
+least 3 times), an interactor ratio of 0.8 (unique users retweeting and mentioning (8) divided by the
 number of followers (10)) and a retweet/mention ratio of 1.75 (unique tweets retweeted and/or quoted (3)
-and tweets mentioning (3, including 2 replies) divided by the number of tweets in corpus (4)). `A`'s Duan
-rank value turns out to be 2.88.
+and tweets mentioning (3, including 2 replies) divided by the number of tweets in corpus (4)). `@B`'s
+interactor ratio is 0.2, its retweet/mention ratio is 0.67 (it was mentioned by in a tweet by `@A`, which
+was then quoted by `@H`, counting for 2, divided by the 3 tweets it posted). `@A`'s Duan rank value turns
+out to be 3.45 and `@B`'s is 1.49.
 
 **NB** Users who do not interact with any other users (i.e. their tweets include no mentions, retweets 
-or quotes) will not have a D-Rank value. It can be assumed to be zero.
+or quotes) will not have a D-Rank value. It can be assumed to be zero. Same with h-index values.
 
 The JSON for the tweets in `test.json` aren't as populated as tweets that are delivered by Twitter itself.
 I only included the fields and values that the code required, though I also included some fields that
