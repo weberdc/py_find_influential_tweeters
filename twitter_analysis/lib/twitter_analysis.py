@@ -125,7 +125,7 @@ class Kudos:
 
     def rm_ratio(self):
         """
-        The Retweet/Mention ratio: (|tweets retweeted| + |tweets mentioning this user| + |tweets quoted|) /
+        The Retweet/Mention ratio: (|tweets retweeted or quoted| + |other tweets mentioning this user|) /
         |tweets posted in the corpus|
         :return The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
         have posted in the current corpus
@@ -133,12 +133,11 @@ class Kudos:
         if self.cached_rm_ratio != -1:
             return self.cached_rm_ratio
 
-        # NB in this app, retweets are not simultaneously counted as a mention, so they must
-        # be added in separately, and combined with quotes
-        retweeted_tweet_ids = self.data['my_retweets'].keys()    # which tweets were retweeted?
-        quoted_tweet_ids = self.data['my_quoted_tweets'].keys()  # which tweets were quoted?
-        inspiring_tweets_count = len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
+        # retweeted_tweet_ids = self.data['my_retweets'].keys()    # which tweets were retweeted?
+        # quoted_tweet_ids = self.data['my_quoted_tweets'].keys()  # which tweets were quoted?
+        # inspiring_tweets_count = 0  # len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
 
+        # NB Relies on the fact we know that every retweet and quote we counted is also counted as a mention
         mention_count = 0
         for mentioner in self.data['mentions_of_me']:
             mention_count += len(self.data['mentions_of_me'][mentioner])
@@ -149,8 +148,8 @@ class Kudos:
         # print("Tweet count for @%s is %d" % (self.data['profile']['screen_name'], tweet_count))
         # print("Unique inspiring tweets count is %d" % inspiring_tweets_count)
         # print("Mention count (including replies) is %d" % mention_count)
-        self.cached_rm_ratio = \
-            (inspiring_tweets_count + mention_count) / float(tweet_count) if tweet_count else 0
+        self.cached_rm_ratio = mention_count / float(tweet_count) if tweet_count else 0
+
         return self.cached_rm_ratio
 
     def update_screen_name(self, screen_name):
@@ -248,7 +247,12 @@ class TwitterAnalysis:
             return get_or(kudos, user_id, Kudos())
 
         # parse all tweets and build kudos for each user
+        i = 0
+        import sys
         for t in all_tweets.values():
+            i += 1
+            if self.options.debug:
+                sys.stdout.write("%2d." % i)
             tweeting_user = t['user']['screen_name']
             tweet_id = t['id_str']
             tweet_text = make_safe(t['text'])
@@ -256,30 +260,40 @@ class TwitterAnalysis:
             if self.is_favourited(t):
                 get_kudos(tweeting_user).add_favourite(tweet_id)
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
+            t_stack = [t]  # stack of tweets, including this and any embedded ones
             if self.is_a_quote(t):
                 quoted_user = t['quoted_status']['user']['screen_name']
                 quoted_tweet_id = t['quoted_status']['id_str']
                 get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, tweet_id)
                 get_kudos(quoted_user).update_profile(t['quoted_status'])
+                # a quoted tweet won't have its user_mentions populated - count it manually
+                get_kudos(quoted_user).add_mention(tweeting_user, tweet_id)
+                t_stack.append(t['quoted_status'])
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             if self.is_a_retweet(t):
                 retweeted_user = t['retweeted_status']['user']['screen_name']
                 original_tweet_id = t['retweeted_status']['id_str']
                 get_kudos(retweeted_user).add_retweet(tweeting_user, original_tweet_id)
                 get_kudos(retweeted_user).update_profile(t['retweeted_status'])
+                t_stack.append(t['retweeted_status'])
                 self.debug("RETWEET: @%s retweeted by @%s: %s" % (retweeted_user, tweeting_user, tweet_text))
-            if self.has_mentions(t):
-                for mentioned_user in t['entities']['user_mentions']:
-                    mentioned_sn = mentioned_user['screen_name']
-                    if mentioned_user['id_str'] == t['in_reply_to_user_id_str']:
-                        get_kudos(mentioned_sn) \
-                            .add_reply(tweeting_user, t['in_reply_to_status_id_str'], tweet_id)
-                        get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
-                        self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
-                    elif not self.is_a_retweet(t):
-                        get_kudos(mentioned_sn).add_mention(tweeting_user, tweet_id)
-                        get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
-                        self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
+            t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
+            if len(t_stack):
+                for _t in t_stack:  # [x for x in t_stack if (self.has_mentions(x))]:
+                    for mentioned_user in _t['entities']['user_mentions']:
+                        mentioned_sn = mentioned_user['screen_name']
+                        if mentioned_user['id_str'] == _t['in_reply_to_user_id_str']:
+                            get_kudos(mentioned_sn) \
+                                .add_reply(tweeting_user, _t['in_reply_to_status_id_str'], tweet_id)
+                            get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
+                            self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
+                        else:
+                            # those mentioned in the retweeted tweet ought to get points
+                            if not (self.is_a_retweet(_t) and
+                                    mentioned_user['id_str'] == _t['retweeted_status']['user']['id_str']):
+                                get_kudos(mentioned_sn).add_mention(tweeting_user, tweet_id)
+                                get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
+                                self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
 
         print("Detected %d different Twitter users" % len(kudos))
         kudos_list = kudos.items()
