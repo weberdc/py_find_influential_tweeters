@@ -379,12 +379,12 @@ class TwitterAnalysis:
         for r in h_index_top_few:
             print("  @%s : %4d" % (r[0], r[1].h_index()))
 
-        print("Interactor Ratio (ir)")
+        print("Interactor Ratio (Ir)")
         ir_top_few = sorted(kudos_list, key=lambda row: row[1].int_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
             print("  @%s : %.2f" % (r[0], r[1].int_ratio()))
 
-        print("Retweet/Mention(Reply) Ratio (rmr)")
+        print("Retweet/Mention(Reply) Ratio (RMr)")
         rm_ratio_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
         for r in rm_ratio_top_few:
             print("  @%s : %.2f" % (r[0], r[1].rm_ratio()))
@@ -393,12 +393,12 @@ class TwitterAnalysis:
         (min_ir, max_ir) = min_max(map(lambda row: row[1].int_ratio(), kudos_list))
         (min_rmr, max_rmr) = min_max(map(lambda row: row[1].rm_ratio(), kudos_list))
 
-        print("Social Networking Potential (ir' * 0.25 + rmr' * 0.75)")
+        print("Social Networking Potential (Ir' * 0.25 + RMr' * 0.75)")
         snp_top_few = sorted(kudos_list,
-                                 key=lambda row:
-                                     (0.25 * normalise(row[1].int_ratio(), min_ir, max_ir) +
-                                      0.75 * normalise(row[1].rm_ratio(), min_rmr, max_rmr)),
-                                 reverse=True)[:how_few]
+                             key=lambda row:
+                                 (0.25 * normalise(row[1].int_ratio(), min_ir, max_ir) +
+                                  0.75 * normalise(row[1].rm_ratio(), min_rmr, max_rmr)),
+                             reverse=True)[:how_few]
         for r in snp_top_few:
             print("  @%s : %.2f" % (
                 r[0],
@@ -406,7 +406,7 @@ class TwitterAnalysis:
                  0.75 * normalise(r[1].rm_ratio(), min_rmr, max_rmr))
             ))
 
-        print("Mixture Model Ratio ((h' + ir' + rmr') / 3)")
+        print("Mixture Model Ratio ((h' + Ir' + RMr') / 3)")
         blended_top_few = sorted(kudos_list,
                                  key=lambda row:
                                      (normalise(row[1].h_index(), min_h_index, max_h_index) +
@@ -421,10 +421,16 @@ class TwitterAnalysis:
                  normalise(r[1].rm_ratio(), min_rmr, max_rmr)) / 3.0
             ))
 
-        print("Post/Activity Ratio (par)")
-        pa_ratio_top_few = sorted(kudos_list, key=lambda row: row[1].pa_ratio(), reverse=True)[:how_few]
+        print("Post/Activity Ratio (PAr)")
+        rt_w = float(self.options.rt_weight)
+        qu_w = float(self.options.qu_weight)
+        re_w = float(self.options.re_weight)
+        fav_w = float(self.options.fav_weight)
+        pa_ratio_top_few = sorted(kudos_list,
+                                  key=lambda row: row[1].pa_ratio(rt_w, qu_w, re_w, fav_w),
+                                  reverse=True)[:how_few]
         for r in pa_ratio_top_few:
-            print("  @%s : %.2f" % (r[0], r[1].pa_ratio()))
+            print("  @%s : %.2f" % (r[0], r[1].pa_ratio(rt_w, qu_w, re_w, fav_w)))
 
         print("D-Rank")
         d_rank_scores = self.d_rank(all_tweets.values(),
