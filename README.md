@@ -1,9 +1,32 @@
 # py\_twitter\_analysis
 An experimental project to analyse tweet data, specifically looking for signs of *"influence"*.
 
-Current metrics generated are a variant on the academic h-index, a retweeter/mention ratio, a mixture
-model of retweeter/mention ratio and interactor ratio, and a modification of the Duan-rank PageRank
-variant algorithm from a paper:
+Current metrics generated are a variant on the academic h-index, an interactor ratio, a
+retweet/mention ratio (more of a retweet/reply ratio really), a mixture model of retweeter/mention
+ratio and interactor ratio called the _Social Network Potential_, all from a survey paper:
+
+ * Riquelme, Fabián, and Pablo González-Cantergiani. "Measuring user influence on Twitter: A
+   survey." Information Processing & Management 52, no. 5 (2016): 949-975.
+
+Interactor ratio, _Ir_:
+
+ * _Ir_ = `|unique retweeters/quoters/mentioners| / |followers|`
+
+Retweet/Mention ratio, _RMr_
+
+ * _RMr_ = `(|tweets retweeted or quoted| + |tweets replied to|) / |tweets posted|`
+
+In addition to the SNP (0.25 * Ir + 0.75 * RMr), we include a mixture model which includes the
+H-Index also: `(normalised(h-index) + normalised(Ir) + normalised(RMr)) / 3.0`
+
+I included a measure of my own, which I call the post/activity ratio (_PAr_), which is intended
+to measure the amount of activity inspired by tweets against the number of tweets posted (in the
+corpus). I used 1, 2, 3, 1 as the default values for weights for retweets, quotes, replies and
+favourites respectively.
+
+ * _PAr_ = `(RT_weight * log(|retweets|) + QU_weight * log(|quotes|) + RE_weight * log(|replies|) + FAV_weight * log(|favourited|) / |tweets posted|`
+
+Also included is a modification of the Duan-rank PageRank variant algorithm from a paper:
 
  * Duan, Y., et al. "An empirical study on learning to rank of tweets." Proceedings
    of the 23rd International Conference on Computational Linguistics. Association for
@@ -34,7 +57,7 @@ User `@A` tweets four original tweets:
 * `@A: tweet A1` (ID: `11`, follower count: 10)
 * `@A: tweet A2` (ID: `12`, follower count: 10)
 * `@A: tweet A3` (ID: `13`, follower count: 10)
-* `@A: tweet A4 @B` (ID: `14`, mentioning: `@B`)
+* `@A: tweet A4 @B` (ID: `14`, mentioning: `@B`, favourited count: 10)
 
 Users `@B`, `@C`, and `@D` all retweet `@A`'s first three tweets, resulting in:
 
@@ -69,15 +92,19 @@ User `@H` refers to an URL, and quotes a tweet mentioning another user:
 * `@H: Right on @A!` (ID: `91`, mentions screen name `@A`, includes URL to tweet `14` and expanded URL
   `https://twitter/A/status/14` which itself mentions screen name `@B`
 
-The expected output based on this set is for user `@A` to have an h-index of 3 (3 tweets each retweeted at
-least 3 times), an interactor ratio of 0.6 (unique users retweeting and mentioning (6) divided by the
-number of followers (10)) and a retweet/mention ratio of 1.75 (unique tweets retweeted and/or quoted (3)
-and tweets mentioning (3, including 2 replies) divided by the number of tweets in corpus (4)). `@B`'s
-interactor ratio is 0.2, its retweet/mention ratio is 0.67 (it was mentioned by in a tweet by `@A`, which
-was then quoted by `@H`, counting for 2, divided by the 3 tweets it posted). `@A`'s Duan rank value turns
-out to be 3.45 and `@B`'s is 1.49 (and 0.8 for others).
+The expected output from is:
 
-**NB** Users who do not interact with any other users (i.e. their tweets include no mentions, retweets 
+|User|@A |@B |others|
+|----|:-:|:-:|:-:|
+|h-index|3|0|0|
+|Ir|0.6|0.2|0|
+|RMr|1.5|0|0|
+|SNP|1|0.08|0|
+|Mixture|1|0.11|0|
+|PAr|2.55|0|0|
+|D-rank|3.45|1.49|0.8|
+
+**NB** Users who do not interact with any other users (i.e. their tweets include no mentions, retweets
 or quotes) will not have a D-Rank value. It can be assumed to be zero. Same with h-index values.
 
 The JSON for the tweets in `test.json` aren't as populated as tweets that are delivered by Twitter itself.

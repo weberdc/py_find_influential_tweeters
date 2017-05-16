@@ -1,6 +1,7 @@
 import unicodedata
 import operator
 
+from math import log
 from pprint import pprint
 
 
@@ -62,6 +63,7 @@ class Kudos:
         self.cached_h_index = -1
         self.cached_int_ratio = -1
         self.cached_rm_ratio = -1
+        self.cached_pa_ratio = -1
 
     def h_index(self):
         """
@@ -114,9 +116,6 @@ class Kudos:
                 for quotes_of_that_tweet in self.data['my_quoted_tweets'][quoted_tweet_id]:
                     unique_quoters.add(quotes_of_that_tweet[0])  # value is (user, quoting tweet ID)
 
-        if 'profile' not in self.data:
-            pprint(self.data)
-
         followers_count = get_or(self.data['profile'], 'followers_count', 0)
 
         # sn = self.data['profile']['screen_name']
@@ -129,12 +128,61 @@ class Kudos:
             float(followers_count) if followers_count else 0
         return self.cached_int_ratio
 
+    def pa_ratio(self, rt_weight=1, qu_weight=2, re_weight=3, fav_weight=1):
+        """
+        The Post/Activity ratio:
+          (rt_weight*|retweets| + qu_weight*|quotes| + re_weight*|replies| + fav_weight*|favourites|) /
+          |tweets posted in the corpus|
+        :param rt_weight: Weighting for retweets (default: 1)
+        :param qu_weight: Weighting for quotes (default: 2)
+        :param re_weight: Weighting for replies (default: 3)
+        :param fav_weight: Weighting for favourites (default: 1)
+        :return The ratio of activities (retweets, quotes, replies, favourite counts) of this user to the number of
+        tweets they have posted in the current corpus
+        """
+        if self.cached_pa_ratio != -1:
+            return self.cached_pa_ratio
+
+        # print("PA calc for @%s" % self.data['profile']['screen_name'])
+
+        retweet_count = 0
+        for retweeted_tweet_id in self.data['my_retweets']:
+            # print("RTs of {0}: {1}".format(retweeted_tweet_id, len(self.data['my_retweets'][retweeted_tweet_id])))
+            retweet_count += len(self.data['my_retweets'][retweeted_tweet_id])
+
+        quote_count = 0
+        for quoted_tweet_id in self.data['my_quoted_tweets']:
+            # print("Quote of {0} is {1}".format(quoted_tweet_id, len(self.data['my_quoted_tweets'][quoted_tweet_id])))
+            quote_count += len(self.data['my_quoted_tweets'][quoted_tweet_id])
+
+        reply_count = 0
+        for replied_to_tweet_id in self.data['replies_to']:
+            for replier in self.data['replies_to'][replied_to_tweet_id]:
+                # print("RE to %s from %s: %s times" %
+                #       (replied_to_tweet_id, replier, len(self.data['replies_to'][replied_to_tweet_id][replier])))
+                reply_count += len(self.data['replies_to'][replied_to_tweet_id][replier])
+
+        fav_count = 0
+        for faved_tweet_id in self.data['favourited']:
+            # print("%s faved %s times" % (faved_tweet_id, self.data['favourited'][faved_tweet_id]))
+            fav_count += self.data['favourited'][faved_tweet_id]
+
+        tweet_count = self.get_corpus_tweet_count()
+        rt_part = rt_weight * log(retweet_count + 1)
+        qu_part = qu_weight * log(quote_count + 1)
+        re_part = re_weight * log(reply_count + 1)
+        fav_part = fav_weight * log(fav_count + 1)
+
+        self.cached_pa_ratio = (rt_part + qu_part + re_part + fav_part) / float(tweet_count) if tweet_count else 0
+
+        return self.cached_pa_ratio
+
     def rm_ratio(self):
         """
-        The Retweet/Mention ratio: (|tweets retweeted or quoted| + |other tweets mentioning this user|) /
+        The "Retweet/Mention" ratio: (|tweets retweeted or quoted| + |tweets replied to|) /
         |tweets posted in the corpus|
-        :return The ratio of interactions (retweets, quotes, mentions) of this user to the number of tweets they
-        have posted in the current corpus
+        :return The ratio of tweets inspiring interactions (considering retweets, quotes and replies) of this user to
+        the number of tweets they have posted in the current corpus
         """
         if self.cached_rm_ratio != -1:
             return self.cached_rm_ratio
@@ -149,27 +197,18 @@ class Kudos:
             for quoted_tweet in self.data['my_quoted_tweets'][quoted_tweet_id]:
                 quoting_tweet_ids.add(quoted_tweet[1])  # value is (quoting user, quoting tweet ID)
         # print("  quoted_tweet_ids: %s" % self.data['my_quoted_tweets'])
+        # this is the number of unique tweets that inspired a quote and/or an RT
         inspiring_tweets_count = len(set(retweeted_tweet_ids).union(quoted_tweet_ids))
 
-        # NB Relies on the fact we know that every retweet and quote we counted is also counted as a mention
-        mention_count = 0
-        # print("  mentions_of_me: %s" % self.data['mentions_of_me'])
-        for mentioner in self.data['mentions_of_me']:
-            mention_count += len(self.data['mentions_of_me'][mentioner])
-            for quoting_tweet_id in quoting_tweet_ids:  # ignore mentions from quotes (accounted for already)
-                if False and quoting_tweet_id in self.data['mentions_of_me'][mentioner]:
-                    mention_count -= 1
-        # print("  after mentions_of_me, ignoring quotes, mention_count = %d" % mention_count)
-        for replies in self.data['replies_to']:
-            mention_count += len(self.data['replies_to'][replies])
-        # print("  after replies, mention_count = %d" % mention_count)
+        # Only consider mentions that are in response to a tweet
+        reply_count = len(self.data['replies_to'])
 
         tweet_count = self.get_corpus_tweet_count()
         # print("Tweet count for @%s is %d" % (self.data['profile']['screen_name'], tweet_count))
         # print("  %s" % self.data['profile']['corpus_tweet_set'])
         # print("Unique inspiring tweets count is %d" % inspiring_tweets_count)
         # print("Mention count (including replies) is %d" % mention_count)
-        self.cached_rm_ratio = (inspiring_tweets_count + mention_count) / float(tweet_count) if tweet_count else 0
+        self.cached_rm_ratio = (inspiring_tweets_count + reply_count) / float(tweet_count) if tweet_count else 0
 
         return self.cached_rm_ratio
 
@@ -188,10 +227,11 @@ class Kudos:
     def get_corpus_tweet_count(self):
         return len(get_or(self.data['profile'], 'corpus_tweet_set', set()))
 
-    def add_favourite(self, tweet_id):
+    def update_favourite_count(self, tweet_id, new_fav_count):
         faves = get_or(self.data, 'favourited', {})
         fave_count = get_or(faves, tweet_id, 0)
-        faves[tweet_id] = fave_count + 1
+        if new_fav_count > fave_count:
+            faves[tweet_id] = new_fav_count
 
     def add_quote(self, quoter, quoted_tweet_id, quoting_tweet_id):
         my_tweets_quoted = get_or(self.data, 'my_quoted_tweets', {})
@@ -226,7 +266,7 @@ class TwitterAnalysis:
 
     @staticmethod
     def is_favourited(tweet):
-        return tweet['favorited'] == 'true'
+        return tweet['favorited'] == 'true' or int(tweet['favorite_count']) > 0
 
     @staticmethod
     def is_a_quote(tweet):
@@ -256,11 +296,11 @@ class TwitterAnalysis:
             t_id = t['id_str']
             all_tweets[t_id] = t
             if self.is_a_quote(t):
-                quoting_tweet = t['quoted_status']
-                all_tweets[quoting_tweet['id_str']] = quoting_tweet
+                quoted_tweet = t['quoted_status']
+                all_tweets[quoted_tweet['id_str']] = quoted_tweet
             elif self.is_a_retweet(t):
-                retweeted_status = t['retweeted_status']
-                all_tweets[retweeted_status['id_str']] = retweeted_status
+                retweeted_tweet = t['retweeted_status']
+                all_tweets[retweeted_tweet['id_str']] = retweeted_tweet
 
         print("Analysing %d tweets..." % len(all_tweets))
 
@@ -279,7 +319,9 @@ class TwitterAnalysis:
             tweet_text = make_safe(t['text'])
             get_kudos(tweeting_user).update_profile(t)
             if self.is_favourited(t):
-                get_kudos(tweeting_user).add_favourite(tweet_id)
+                # This will only work for tweets collected via the REST API;
+                # tweets collected via the stream will not have had a chance to be favourited when we collect them
+                get_kudos(tweeting_user).update_favourite_count(tweet_id, t['favorite_count'])
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
             t_stack = [t]  # stack of tweets, including this and any embedded ones
             is_a_retweet = self.is_a_retweet(t)
@@ -299,14 +341,14 @@ class TwitterAnalysis:
                 #
                 # - If @A retweets @B's quote of @C, then we get @A RETWEETS @B, and @B QUOTES @C.
                 # - If @A quotes @B's retweet of @C, then we get @A quotes @C only.
-                quoting_tweet = t
+                quoted_tweet = t
                 if is_a_retweet:
-                    quoting_tweet = t['retweeted_status']
+                    quoted_tweet = t['retweeted_status']
 
                 quoted_tweet = t['quoted_status']
                 quoted_user = quoted_tweet['user']['screen_name']
                 quoted_tweet_id = quoted_tweet['id_str']
-                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoting_tweet['id_str'])
+                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet['id_str'])
                 t_stack.append(quoted_tweet)  # quoting_tweet)
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
@@ -335,21 +377,34 @@ class TwitterAnalysis:
         print("H-Index (h)")
         h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
         for r in h_index_top_few:
-            print("%5d : @%s" % (r[1].h_index(), r[0]))
+            print("  @%s : %4d" % (r[0], r[1].h_index()))
 
         print("Interactor Ratio (ir)")
         ir_top_few = sorted(kudos_list, key=lambda row: row[1].int_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
-            print("  %.2f : @%s" % (r[1].int_ratio(), r[0]))
+            print("  @%s : %.2f" % (r[0], r[1].int_ratio()))
 
-        print("Retweet and Mention Ratio (rmr)")
-        h_index_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
-        for r in h_index_top_few:
-            print("  %.2f : @%s" % (r[1].rm_ratio(), r[0]))
+        print("Retweet/Mention(Reply) Ratio (rmr)")
+        rm_ratio_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
+        for r in rm_ratio_top_few:
+            print("  @%s : %.2f" % (r[0], r[1].rm_ratio()))
 
         (min_h_index, max_h_index) = min_max(map(lambda row: row[1].h_index(), kudos_list))
         (min_ir, max_ir) = min_max(map(lambda row: row[1].int_ratio(), kudos_list))
         (min_rmr, max_rmr) = min_max(map(lambda row: row[1].rm_ratio(), kudos_list))
+
+        print("Social Networking Potential (ir' * 0.25 + rmr' * 0.75)")
+        snp_top_few = sorted(kudos_list,
+                                 key=lambda row:
+                                     (0.25 * normalise(row[1].int_ratio(), min_ir, max_ir) +
+                                      0.75 * normalise(row[1].rm_ratio(), min_rmr, max_rmr)),
+                                 reverse=True)[:how_few]
+        for r in snp_top_few:
+            print("  @%s : %.2f" % (
+                r[0],
+                (0.25 * normalise(r[1].int_ratio(), min_ir, max_ir) +
+                 0.75 * normalise(r[1].rm_ratio(), min_rmr, max_rmr))
+            ))
 
         print("Mixture Model Ratio ((h' + ir' + rmr') / 3)")
         blended_top_few = sorted(kudos_list,
@@ -359,12 +414,17 @@ class TwitterAnalysis:
                                       normalise(row[1].rm_ratio(), min_rmr, max_rmr)) / 3.0,
                                  reverse=True)[:how_few]
         for r in blended_top_few:
-            print("  %.2f : @%s" % (
+            print("  @%s : %.2f" % (
+                r[0],
                 (normalise(r[1].h_index(), min_h_index, max_h_index) +
                  normalise(r[1].int_ratio(), min_ir, max_ir) +
-                 normalise(r[1].rm_ratio(), min_rmr, max_rmr)) / 3.0,
-                r[0]
+                 normalise(r[1].rm_ratio(), min_rmr, max_rmr)) / 3.0
             ))
+
+        print("Post/Activity Ratio (par)")
+        pa_ratio_top_few = sorted(kudos_list, key=lambda row: row[1].pa_ratio(), reverse=True)[:how_few]
+        for r in pa_ratio_top_few:
+            print("  @%s : %.2f" % (r[0], r[1].pa_ratio()))
 
         print("D-Rank")
         d_rank_scores = self.d_rank(all_tweets.values(),
@@ -374,7 +434,7 @@ class TwitterAnalysis:
                                     self.options.debug)
         d_rank_top_few = sorted(d_rank_scores.items(), key=lambda kv: kv[1], reverse=True)[:how_few]
         for r in d_rank_top_few:
-            print("  %.2f : @%s" % (r[1], r[0]))
+            print("  @%s : %.2f" % (r[0], r[1]))
 
         print("Done.")
 
