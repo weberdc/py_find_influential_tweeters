@@ -2,7 +2,6 @@ import unicodedata
 import operator
 
 from math import log
-from pprint import pprint
 
 
 def get_or(m, k, v):
@@ -218,11 +217,18 @@ class Kudos:
 
     def update_profile(self, tweet):
         profile = get_or(self.data, 'profile', {})
-        get_or(profile, 'screen_name', tweet['user']['screen_name'])
-        update_count(profile, 'followers_count', tweet['user']['followers_count'])
-        update_count(profile, 'friends_count', tweet['user']['friends_count'])
-        update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
-        get_or(profile, 'corpus_tweet_set', set()).add(tweet['id_str'])  # unique tweets in corpus
+        if 'id_str' in tweet:
+            get_or(profile, 'screen_name', tweet['user']['screen_name'])
+            update_count(profile, 'followers_count', tweet['user']['followers_count'])
+            update_count(profile, 'friends_count', tweet['user']['friends_count'])
+            update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
+            get_or(profile, 'corpus_tweet_set', set()).add(tweet['id_str'])  # unique tweets in corpus
+        else:
+            get_or(profile, 'screen_name', tweet['user']['screenName'])
+            update_count(profile, 'followers_count', tweet['user']['followersCount'])
+            update_count(profile, 'friends_count', tweet['user']['friendsCount'])
+            update_count(profile, 'total_tweet_count', tweet['user']['statusesCount'])
+            get_or(profile, 'corpus_tweet_set', set()).add(tweet['id'])  # unique tweets in corpus
 
     def get_corpus_tweet_count(self):
         return len(get_or(self.data['profile'], 'corpus_tweet_set', set()))
@@ -266,19 +272,23 @@ class TwitterAnalysis:
 
     @staticmethod
     def is_favourited(tweet):
-        return tweet['favorited'] == 'true' or int(tweet['favorite_count']) > 0
+        if 'id_str' in tweet:
+            return tweet['favorited'] == 'true' or int(tweet['favorite_count']) > 0
+        else:
+            return tweet['favorited'] == 'true' or int(tweet['favoriteCount']) > 0
 
     @staticmethod
     def is_a_quote(tweet):
-        return 'quoted_status' in tweet
+        return 'quoted_status' in tweet or ('quotedStatus' in tweet and tweet['quotedStatus'])
 
     @staticmethod
     def is_a_retweet(tweet):
-        return 'retweeted_status' in tweet
+        return 'retweeted_status' in tweet or ('retweetedStatus' in tweet and tweet['retweetedStatus'])
 
     @staticmethod
     def has_mentions(tweet):
-        return 'user_mentions' in tweet['entities']
+        return ('entities' in tweet and 'user_mentions' in tweet['entities']) or \
+               ('userMentionEntities' in tweet and tweet['userMentionEntities'])
 
     def debug(self, msg):
         if self.options.debug:
@@ -298,28 +308,40 @@ class TwitterAnalysis:
 
         # parse all tweets and build kudos for each user
         i = 0
+        standard = True
         import sys
         for t in tweets:
             i += 1
+            # print("Processing tweet #%d" % i)
+            # if i == 1:
+            #     print(t.keys())
+            standard = 'id_str' in t  # is this the standard Twitter format or a known (Twitter4j serialised) alt've?
             if self.options.debug:
                 sys.stdout.write("%2d." % i)
-            tweeting_user = t['user']['screen_name']
-            tweet_id = t['id_str']
+            tweeting_user = t['user']['screen_name'] if standard else t['user']['screenName']
+            tweet_id = t['id_str'] if standard else t['id']
             tweet_text = make_safe(t['text'])
             get_kudos(tweeting_user).update_profile(t)
             if self.is_favourited(t):
                 # This will only work for tweets collected via the REST API;
                 # tweets collected via the stream will not have had a chance to be favourited when we collect them
-                get_kudos(tweeting_user).update_favourite_count(tweet_id, t['favorite_count'])
+                fav_count = t['favorite_count'] if standard else t['favoriteCount']
+                get_kudos(tweeting_user).update_favourite_count(tweet_id, fav_count)
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
             t_stack = [t]  # stack of tweets, including this and any embedded ones
             is_a_retweet = self.is_a_retweet(t)
             if is_a_retweet:
-                retweeted_user = t['retweeted_status']['user']['screen_name']
-                original_tweet_id = t['retweeted_status']['id_str']
+                if standard:
+                    retweeted_status = t['retweeted_status']
+                    retweeted_user = t['retweeted_status']['user']['screen_name']
+                    original_tweet_id = t['retweeted_status']['id_str']
+                else:
+                    retweeted_status = t['retweetedStatus']
+                    retweeted_user = t['retweetedStatus']['user']['screenName']
+                    original_tweet_id = t['retweetedStatus']['id']
                 get_kudos(retweeted_user).add_retweet(tweeting_user, original_tweet_id)
-                get_kudos(retweeted_user).update_profile(t['retweeted_status'])
-                t_stack.append(t['retweeted_status'])
+                get_kudos(retweeted_user).update_profile(retweeted_status)
+                t_stack.append(retweeted_status)
                 self.debug("RETWEET: @%s retweeted by @%s: %s" % (retweeted_user, tweeting_user, tweet_text))
             if self.is_a_quote(t):
                 # NB, it's possible to have a retweet of a quoted tweet, but not a quote of a retweet (the
@@ -330,34 +352,50 @@ class TwitterAnalysis:
                 #
                 # - If @A retweets @B's quote of @C, then we get @A RETWEETS @B, and @B QUOTES @C.
                 # - If @A quotes @B's retweet of @C, then we get @A quotes @C only.
-                quoted_tweet = t['quoted_status']
+                quoted_tweet = t['quoted_status'] if standard else t['quotedStatus']
                 if is_a_retweet:
-                    quoted_tweet = t['retweeted_status']
+                    quoted_tweet = t['retweeted_status'] if standard else t['retweetedStatus']
 
-                quoted_user = quoted_tweet['user']['screen_name']
-                quoted_tweet_id = quoted_tweet['id_str']
-                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet['id_str'])
+                quoted_user = quoted_tweet['user']['screen_name'] if standard else quoted_tweet['user']['screenName']
+                quoted_tweet_id = quoted_tweet['id_str'] if standard else quoted_tweet['id']
+                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet_id)  # ['id_str'])
                 t_stack.append(quoted_tweet)
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
             if len(t_stack):
                 for _t in t_stack:
-                    for mentioned_user in _t['entities']['user_mentions']:
-                        mentioned_sn = mentioned_user['screen_name']
-                        if mentioned_user['id_str'] == _t['in_reply_to_user_id_str']:
+                    mentions = _t['entities']['user_mentions'] if standard else _t['userMentionEntities']
+                    for mentioned_user in mentions:
+                        mentioned_sn = mentioned_user['screen_name'] if standard else mentioned_user['screenName']
+                        mentioned_user_id = mentioned_user['id_str'] if standard else mentioned_user['id']
+                        in_reply_to_user_id = _t['in_reply_to_user_id_str'] if standard else _t['inReplyToUserId']
+                        if mentioned_user_id == in_reply_to_user_id:
+                            in_reply_to_status_id = _t['in_reply_to_status_id_str'] if standard else _t['inReplyToStatusId']
                             get_kudos(mentioned_sn) \
-                                .add_reply(tweeting_user, _t['in_reply_to_status_id_str'], tweet_id)
+                                .add_reply(tweeting_user, in_reply_to_status_id, tweet_id)
                             get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                             self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
                         else:
                             # those mentioned in the retweeted or quoted tweet ought to get extra points
-                            if (not (self.is_a_retweet(_t) and
-                                     mentioned_user['id_str'] == _t['retweeted_status']['user']['id_str'])) \
-                                and (not (self.is_a_quote(_t) and
-                                          mentioned_user['id_str'] == _t['quoted_status']['user']['id_str'])):
-                                get_kudos(mentioned_sn).add_mention(tweeting_user, _t['id_str'])
+                            retweeted_author_id = ''
+                            if self.is_a_retweet(_t):
+                                if standard:
+                                    retweeted_author_id = _t['retweeted_status']['user']['id_str']
+                                else:
+                                    retweeted_author_id = _t['retweetedStatus']['user']['id']
+                            quoted_author_id = ''
+                            if self.is_a_quote(_t):
+                                if standard:
+                                    quoted_author_id = _t['quoted_status']['user']['id_str']
+                                else:
+                                    quoted_author_id = _t['quotedStatus']['user']['id']
+                            if (not (self.is_a_retweet(_t) and mentioned_user_id == retweeted_author_id) and
+                                    not (self.is_a_quote(_t) and mentioned_user_id == quoted_author_id)):
+                                _t_id = _t['id_str'] if standard else _t['id']
+                                get_kudos(mentioned_sn).add_mention(tweeting_user, _t_id)
                                 get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
-                                self.debug("MENTION: @%s mentioned by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
+                                self.debug("MENTION: @%s mentioned by @%s: %s" %
+                                           (mentioned_sn, tweeting_user, tweet_text))
 
         print("Detected %d different Twitter users" % len(kudos))
         kudos_list = kudos.items()
@@ -421,10 +459,11 @@ class TwitterAnalysis:
             print("  @%s : %.2f" % (r[0], r[1].pa_ratio(rt_w, qu_w, re_w, fav_w)))
 
         print("D-Rank")
-        d_rank_scores = self.d_rank(tweets,  # .values(),
+        d_rank_scores = self.d_rank(tweets,
                                     int(self.options.max_iterations),
                                     int(self.options.tweet_count),
                                     float(self.options.d_rank_weight_factor),
+                                    standard,
                                     self.options.debug)
         d_rank_top_few = sorted(d_rank_scores.items(), key=lambda kv: kv[1], reverse=True)[:how_few]
         for r in d_rank_top_few:
@@ -433,7 +472,7 @@ class TwitterAnalysis:
         print("Done.")
 
     @staticmethod
-    def gather_interactions(tweets, users, incoming, outgoing):
+    def gather_interactions(tweets, users, incoming, outgoing, standard=True):
         # tweets: list of parsed tweets
         # users: set of users to populate with usernames seen in tweets
         # incoming: { mentioned_user: { mentioning_user : [mentioning_tweet_ID] } } -- possible duplicates from RTs/Qus
@@ -447,37 +486,40 @@ class TwitterAnalysis:
 
         def process_tweet(tweet):
             if TwitterAnalysis.is_a_quote(tweet):
-                quoting_user = tweet['user']['screen_name']
-                quoted_user = tweet['quoted_status']['user']['screen_name']
+                quoting_user = tweet['user']['screen_name'] if standard else tweet['user']['screenName']
+                quoted_tweet = tweet['quoted_status'] if standard else tweet['quotedStatus']
+                quoted_user = quoted_tweet['user']['screen_name'] if standard else quoted_tweet['user']['screenName']
 
-                link(quoted_user, quoting_user, tweet['id_str'])
+                link(quoted_user, quoting_user, tweet['id_str'] if standard else tweet['id'])
 
-                quoted_tweet = tweet['quoted_status']
                 process_tweet(quoted_tweet)
 
                 # if someone is mentioned in the quoted status, then the quoter and the mentionee are also linked
                 if TwitterAnalysis.has_mentions(quoted_tweet):
-                    for mention in quoted_tweet['entities']['user_mentions']:
-                        mentioned_user = mention['screen_name']
+                    mentions = quoted_tweet['entities']['user_mentions'] if standard \
+                        else quoted_tweet['userMentionEntities']
+                    for mention in mentions:
+                        mentioned_user = mention['screen_name'] if standard else mention['screenName']
 
                         link(mentioned_user, quoting_user, tweet['id_str'])
 
             if TwitterAnalysis.is_a_retweet(tweet):
-                process_tweet(t['retweeted_status'])
+                process_tweet(t['retweeted_status'] if standard else t['retweetedStatus'])
 
             if TwitterAnalysis.has_mentions(tweet):
                 # covers RTs, replies and mentions
-                for mention in tweet['entities']['user_mentions']:
-                    mentioned_user = mention['screen_name']
-                    mentioning_user = tweet['user']['screen_name']
+                mentions = tweet['entities']['user_mentions'] if standard else tweet['userMentionEntities']
+                for mention in mentions:
+                    mentioned_user = mention['screen_name'] if standard else mention['screenName']
+                    mentioning_user = tweet['user']['screen_name'] if standard else tweet['user']['screenName']
 
-                    link(mentioned_user, mentioning_user, tweet['id_str'])
+                    link(mentioned_user, mentioning_user, tweet['id_str'] if standard else tweet['id'])
 
         for t in tweets:
             process_tweet(t)
 
     @staticmethod
-    def d_rank(tweets, max_iterations, tweet_count, weight_factor=0.2, debug=False):
+    def d_rank(tweets, max_iterations, tweet_count, weight_factor=0.2, standard=True, debug=False):
 
         damping_factor = 1 - weight_factor
         interesting_delta = 0.001   # redo scores if new value differs by this
@@ -489,7 +531,9 @@ class TwitterAnalysis:
         tweets_to_consider = tweets if tweet_count == -1 else tweets[0:tweet_count]
         if debug:
             print("[INFO] Tweets to consider: %d" % len(tweets_to_consider))
-        TwitterAnalysis.gather_interactions(tweets_to_consider, users, users_who_mentioned_x, users_mentioned_by_x)
+        TwitterAnalysis.gather_interactions(
+            tweets_to_consider, users, users_who_mentioned_x, users_mentioned_by_x, standard
+        )
 
         # Step 1. Set all weights
         for this_user in users:
@@ -503,7 +547,7 @@ class TwitterAnalysis:
             new_influence_scores = {}
             iterations += 1
             if debug:
-                print("\n=== Iteration %d ===" % iterations)
+                print("\n=== Iteration %d (%d users) ===" % (iterations, len(users)))
             for this_user in sorted(users):
                 # grab the previous new_score and call it old_score
                 old_score = influence_scores[this_user]
