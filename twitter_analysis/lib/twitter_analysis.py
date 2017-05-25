@@ -1,5 +1,7 @@
 import unicodedata
-import operator
+# import operator
+
+from .tweet_parsers import StandardParser, Twitter4JParser
 
 from math import log
 
@@ -73,9 +75,9 @@ class Kudos:
             return self.cached_h_index
 
         # turn the retweets & quoted tweets into a list of tuples (tweet_id, list of tweeters)
-        interactions = self.data['my_retweets'].items() + self.data['my_quoted_tweets'].items()
+        interactions = list(self.data['my_retweets'].items()) + list(self.data['my_quoted_tweets'].items())
 
-        sorted_interactions_list = sorted(interactions, key=operator.itemgetter(1))
+        sorted_interactions_list = sorted(interactions, key=lambda t: len(t[1]))  # operator.itemgetter(1))
 
         h_index = 0
         i = len(sorted_interactions_list) - 1
@@ -215,20 +217,13 @@ class Kudos:
         profile = get_or(self.data, 'profile', {})
         get_or(profile, 'screen_name', screen_name)
 
-    def update_profile(self, tweet):
+    def update_profile(self, parser, tweet):
         profile = get_or(self.data, 'profile', {})
-        if 'id_str' in tweet:
-            get_or(profile, 'screen_name', tweet['user']['screen_name'])
-            update_count(profile, 'followers_count', tweet['user']['followers_count'])
-            update_count(profile, 'friends_count', tweet['user']['friends_count'])
-            update_count(profile, 'total_tweet_count', tweet['user']['statuses_count'])
-            get_or(profile, 'corpus_tweet_set', set()).add(tweet['id_str'])  # unique tweets in corpus
-        else:
-            get_or(profile, 'screen_name', tweet['user']['screenName'])
-            update_count(profile, 'followers_count', tweet['user']['followersCount'])
-            update_count(profile, 'friends_count', tweet['user']['friendsCount'])
-            update_count(profile, 'total_tweet_count', tweet['user']['statusesCount'])
-            get_or(profile, 'corpus_tweet_set', set()).add(tweet['id'])  # unique tweets in corpus
+        get_or(profile, 'screen_name', parser.get_screen_name(tweet['user']))
+        update_count(profile, 'followers_count', parser.get_followers_count(tweet))
+        update_count(profile, 'friends_count', parser.get_friends_count(tweet))
+        update_count(profile, 'total_tweet_count', parser.get_statuses_count(tweet))
+        get_or(profile, 'corpus_tweet_set', set()).add(parser.get_id(tweet))  # unique tweets in corpus
 
     def get_corpus_tweet_count(self):
         return len(get_or(self.data['profile'], 'corpus_tweet_set', set()))
@@ -270,80 +265,60 @@ class TwitterAnalysis:
     def __init__(self, options):
         self.options = options
 
-    @staticmethod
-    def is_favourited(tweet):
-        if 'id_str' in tweet:
-            return tweet['favorited'] == 'true' or int(tweet['favorite_count']) > 0
-        else:
-            return tweet['favorited'] == 'true' or int(tweet['favoriteCount']) > 0
-
-    @staticmethod
-    def is_a_quote(tweet):
-        return 'quoted_status' in tweet or ('quotedStatus' in tweet and tweet['quotedStatus'])
-
-    @staticmethod
-    def is_a_retweet(tweet):
-        return 'retweeted_status' in tweet or ('retweetedStatus' in tweet and tweet['retweetedStatus'])
-
-    @staticmethod
-    def has_mentions(tweet):
-        return ('entities' in tweet and 'user_mentions' in tweet['entities']) or \
-               ('userMentionEntities' in tweet and tweet['userMentionEntities'])
-
     def debug(self, msg):
         if self.options.debug:
             print(msg)
 
     def analyse(self, tweets):
-        print("Loaded %d tweets..." % len(tweets))
+        num_tweets = len(tweets)
+        print("Loaded %d tweets..." % num_tweets)
 
         # user -> Kudos instance(mentions, retweets, quotes, ...)
         kudos = {}
         how_few = 20  # top X to report on
 
-        print("Analysing %d tweets..." % len(tweets))
+        print("Analysing tweets to provide top %d accounts..." % how_few)
 
         def get_kudos(user_id):
             return get_or(kudos, user_id, Kudos())
 
         # parse all tweets and build kudos for each user
         i = 0
-        standard = True
         import sys
         for t in tweets:
             i += 1
+            if i % (num_tweets / 10) == 0:
+                print('.', end='')
             # print("Processing tweet #%d" % i)
-            # if i == 1:
-            #     print(t.keys())
-            standard = 'id_str' in t  # is this the standard Twitter format or a known (Twitter4j serialised) alt've?
+            # is this the standard Twitter format or a known (Twitter4j serialised) alt've?
+            parser = StandardParser() if 'id_str' in t else Twitter4JParser()
             if self.options.debug:
                 sys.stdout.write("%2d." % i)
-            tweeting_user = t['user']['screen_name'] if standard else t['user']['screenName']
-            tweet_id = t['id_str'] if standard else t['id']
+
+            tweeting_user = parser.get_screen_name(t['user'])
+            tweet_id = parser.get_id(t)
             tweet_text = make_safe(t['text'])
-            get_kudos(tweeting_user).update_profile(t)
-            if self.is_favourited(t):
+            get_kudos(tweeting_user).update_profile(parser, t)
+            if parser.is_favourited(t):
                 # This will only work for tweets collected via the REST API;
                 # tweets collected via the stream will not have had a chance to be favourited when we collect them
-                fav_count = t['favorite_count'] if standard else t['favoriteCount']
+                fav_count = parser.get_favourite_count(t)  # t['favorite_count'] if standard else t['favoriteCount']
                 get_kudos(tweeting_user).update_favourite_count(tweet_id, fav_count)
                 self.debug("FAVE:    @%s tweet favourited (%s)" % (tweeting_user, tweet_id))
+
             t_stack = [t]  # stack of tweets, including this and any embedded ones
-            is_a_retweet = self.is_a_retweet(t)
+            is_a_retweet = parser.is_a_retweet(t)
             if is_a_retweet:
-                if standard:
-                    retweeted_status = t['retweeted_status']
-                    retweeted_user = t['retweeted_status']['user']['screen_name']
-                    original_tweet_id = t['retweeted_status']['id_str']
-                else:
-                    retweeted_status = t['retweetedStatus']
-                    retweeted_user = t['retweetedStatus']['user']['screenName']
-                    original_tweet_id = t['retweetedStatus']['id']
+                retweeted_status = parser.get_retweeted_status(t)
+                retweeted_user = parser.get_screen_name(retweeted_status['user'])
+                original_tweet_id = parser.get_id(retweeted_status)
+
                 get_kudos(retweeted_user).add_retweet(tweeting_user, original_tweet_id)
-                get_kudos(retweeted_user).update_profile(retweeted_status)
+                get_kudos(retweeted_user).update_profile(parser, retweeted_status)
                 t_stack.append(retweeted_status)
                 self.debug("RETWEET: @%s retweeted by @%s: %s" % (retweeted_user, tweeting_user, tweet_text))
-            if self.is_a_quote(t):
+
+            if parser.is_a_quote(t):
                 # NB, it's possible to have a retweet of a quoted tweet, but not a quote of a retweet (the
                 # quote will be of the original tweet). In the case of a retweeted quote, the quoted_status
                 # field of both the retweeted tweet and the original quoting tweet will be populated with
@@ -352,72 +327,70 @@ class TwitterAnalysis:
                 #
                 # - If @A retweets @B's quote of @C, then we get @A RETWEETS @B, and @B QUOTES @C.
                 # - If @A quotes @B's retweet of @C, then we get @A quotes @C only.
-                quoted_tweet = t['quoted_status'] if standard else t['quotedStatus']
+                quoted_tweet = parser.get_quoted_status(t)
                 if is_a_retweet:
-                    quoted_tweet = t['retweeted_status'] if standard else t['retweetedStatus']
+                    quoted_tweet = parser.get_retweeted_status(t)
 
-                quoted_user = quoted_tweet['user']['screen_name'] if standard else quoted_tweet['user']['screenName']
-                quoted_tweet_id = quoted_tweet['id_str'] if standard else quoted_tweet['id']
-                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet_id)  # ['id_str'])
+                quoted_user = parser.get_screen_name(quoted_tweet['user'])
+                quoted_tweet_id = parser.get_id(quoted_tweet)
+                get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet_id)
                 t_stack.append(quoted_tweet)
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
-            t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
+
+            t_stack = [x for x in t_stack if (parser.has_mentions(x))]  # look for those containing mentions
             if len(t_stack):
                 for _t in t_stack:
-                    mentions = _t['entities']['user_mentions'] if standard else _t['userMentionEntities']
+                    mentions = parser.get_mentions(_t)
                     for mentioned_user in mentions:
-                        mentioned_sn = mentioned_user['screen_name'] if standard else mentioned_user['screenName']
-                        mentioned_user_id = mentioned_user['id_str'] if standard else mentioned_user['id']
-                        in_reply_to_user_id = _t['in_reply_to_user_id_str'] if standard else _t['inReplyToUserId']
+
+                        mentioned_sn = parser.get_screen_name(mentioned_user)
+                        mentioned_user_id = parser.get_id(mentioned_user)
+                        in_reply_to_user_id = parser.get_in_reply_to_user_id(_t)
+
                         if mentioned_user_id == in_reply_to_user_id:
-                            in_reply_to_status_id = _t['in_reply_to_status_id_str'] if standard else _t['inReplyToStatusId']
-                            get_kudos(mentioned_sn) \
-                                .add_reply(tweeting_user, in_reply_to_status_id, tweet_id)
+                            in_reply_to_status_id = parser.get_in_reply_to_status_id(_t)
+                            get_kudos(mentioned_sn).add_reply(tweeting_user, in_reply_to_status_id, tweet_id)
                             get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                             self.debug("REPLY:   @%s replied to by @%s: %s" % (mentioned_sn, tweeting_user, tweet_text))
                         else:
                             # those mentioned in the retweeted or quoted tweet ought to get extra points
                             retweeted_author_id = ''
-                            if self.is_a_retweet(_t):
-                                if standard:
-                                    retweeted_author_id = _t['retweeted_status']['user']['id_str']
-                                else:
-                                    retweeted_author_id = _t['retweetedStatus']['user']['id']
+                            if parser.is_a_retweet(_t):
+                                retweeted_author_id = parser.get_id(parser.get_retweeted_status(_t)['user'])
+
                             quoted_author_id = ''
-                            if self.is_a_quote(_t):
-                                if standard:
-                                    quoted_author_id = _t['quoted_status']['user']['id_str']
-                                else:
-                                    quoted_author_id = _t['quotedStatus']['user']['id']
-                            if (not (self.is_a_retweet(_t) and mentioned_user_id == retweeted_author_id) and
-                                    not (self.is_a_quote(_t) and mentioned_user_id == quoted_author_id)):
-                                _t_id = _t['id_str'] if standard else _t['id']
+                            if parser.is_a_quote(_t):
+                                quoted_author_id = parser.get_id(parser.get_quoted_status(_t)['user'])
+
+                            if (not (parser.is_a_retweet(_t) and mentioned_user_id == retweeted_author_id) and
+                                    not (parser.is_a_quote(_t) and mentioned_user_id == quoted_author_id)):
+                                _t_id = parser.get_id(_t)  # _t['id_str'] if standard else _t['id']
                                 get_kudos(mentioned_sn).add_mention(tweeting_user, _t_id)
                                 get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                                 self.debug("MENTION: @%s mentioned by @%s: %s" %
                                            (mentioned_sn, tweeting_user, tweet_text))
 
-        print("Detected %d different Twitter users" % len(kudos))
+        print("\nDetected %d different Twitter users" % len(kudos))
         kudos_list = kudos.items()
 
         print("H-Index (h)")
-        h_index_top_few = sorted(kudos_list, key=lambda row: row[1].h_index(), reverse=True)[:how_few]
+        h_index_top_few = sorted(kudos_list, key=lambda k: k[1].h_index(), reverse=True)[:how_few]
         for r in h_index_top_few:
             print("  @%s : %4d" % (r[0], r[1].h_index()))
 
         print("Interactor Ratio (Ir)")
-        ir_top_few = sorted(kudos_list, key=lambda row: row[1].int_ratio(), reverse=True)[:how_few]
+        ir_top_few = sorted(kudos_list, key=lambda k: k[1].int_ratio(), reverse=True)[:how_few]
         for r in ir_top_few:
             print("  @%s : %.2f" % (r[0], r[1].int_ratio()))
 
         print("Retweet/Mention(Reply) Ratio (RMr)")
-        rm_ratio_top_few = sorted(kudos_list, key=lambda row: row[1].rm_ratio(), reverse=True)[:how_few]
+        rm_ratio_top_few = sorted(kudos_list, key=lambda k: k[1].rm_ratio(), reverse=True)[:how_few]
         for r in rm_ratio_top_few:
             print("  @%s : %.2f" % (r[0], r[1].rm_ratio()))
 
-        (min_h_index, max_h_index) = min_max(map(lambda row: row[1].h_index(), kudos_list))
-        (min_ir, max_ir) = min_max(map(lambda row: row[1].int_ratio(), kudos_list))
-        (min_rmr, max_rmr) = min_max(map(lambda row: row[1].rm_ratio(), kudos_list))
+        (min_h_index, max_h_index) = min_max(list(map(lambda k: k[1].h_index(), kudos_list)))
+        (min_ir, max_ir) = min_max(list(map(lambda k: k[1].int_ratio(), kudos_list)))
+        (min_rmr, max_rmr) = min_max(list(map(lambda k: k[1].rm_ratio(), kudos_list)))
 
         print("Social Networking Potential (Ir' * 0.25 + RMr' * 0.75)")
         snp_top_few = sorted(kudos_list,
@@ -460,10 +433,10 @@ class TwitterAnalysis:
 
         print("D-Rank")
         d_rank_scores = self.d_rank(tweets,
+                                    parser,
                                     int(self.options.max_iterations),
                                     int(self.options.tweet_count),
                                     float(self.options.d_rank_weight_factor),
-                                    standard,
                                     self.options.debug)
         d_rank_top_few = sorted(d_rank_scores.items(), key=lambda kv: kv[1], reverse=True)[:how_few]
         for r in d_rank_top_few:
@@ -472,7 +445,7 @@ class TwitterAnalysis:
         print("Done.")
 
     @staticmethod
-    def gather_interactions(tweets, users, incoming, outgoing, standard=True):
+    def gather_interactions(tweets, users, incoming, outgoing, parser):
         # tweets: list of parsed tweets
         # users: set of users to populate with usernames seen in tweets
         # incoming: { mentioned_user: { mentioning_user : [mentioning_tweet_ID] } } -- possible duplicates from RTs/Qus
@@ -485,41 +458,42 @@ class TwitterAnalysis:
             users.add(interactee)
 
         def process_tweet(tweet):
-            if TwitterAnalysis.is_a_quote(tweet):
-                quoting_user = tweet['user']['screen_name'] if standard else tweet['user']['screenName']
-                quoted_tweet = tweet['quoted_status'] if standard else tweet['quotedStatus']
-                quoted_user = quoted_tweet['user']['screen_name'] if standard else quoted_tweet['user']['screenName']
+            if parser.is_a_quote(tweet):
+                quoting_user = parser.get_screen_name(tweet['user'])
+                quoted_tweet = parser.get_quoted_status(tweet)
+                quoted_user = parser.get_screen_name(quoted_tweet['user'])
 
-                link(quoted_user, quoting_user, tweet['id_str'] if standard else tweet['id'])
+                quoting_tweet_id = parser.get_id(tweet)
+                link(quoted_user, quoting_user, quoting_tweet_id)
 
                 process_tweet(quoted_tweet)
 
                 # if someone is mentioned in the quoted status, then the quoter and the mentionee are also linked
-                if TwitterAnalysis.has_mentions(quoted_tweet):
-                    mentions = quoted_tweet['entities']['user_mentions'] if standard \
-                        else quoted_tweet['userMentionEntities']
+                if parser.has_mentions(quoted_tweet):
+                    mentions = parser.get_mentions(quoted_tweet)
                     for mention in mentions:
-                        mentioned_user = mention['screen_name'] if standard else mention['screenName']
+                        mentioned_user = parser.get_screen_name(mention)
 
-                        link(mentioned_user, quoting_user, tweet['id_str'])
+                        link(mentioned_user, quoting_user, quoting_tweet_id)
 
-            if TwitterAnalysis.is_a_retweet(tweet):
-                process_tweet(t['retweeted_status'] if standard else t['retweetedStatus'])
+            if parser.is_a_retweet(tweet):
+                process_tweet(parser.get_retweeted_status(t))
 
-            if TwitterAnalysis.has_mentions(tweet):
+            if parser.has_mentions(tweet):
                 # covers RTs, replies and mentions
-                mentions = tweet['entities']['user_mentions'] if standard else tweet['userMentionEntities']
+                mentions = parser.get_mentions(tweet)
                 for mention in mentions:
-                    mentioned_user = mention['screen_name'] if standard else mention['screenName']
-                    mentioning_user = tweet['user']['screen_name'] if standard else tweet['user']['screenName']
+                    mentioned_user = parser.get_screen_name(mention)
+                    mentioning_user = parser.get_screen_name(tweet['user'])
 
-                    link(mentioned_user, mentioning_user, tweet['id_str'] if standard else tweet['id'])
+                    mentioning_tweet_id = parser.get_id(tweet)
+                    link(mentioned_user, mentioning_user, mentioning_tweet_id)
 
         for t in tweets:
             process_tweet(t)
 
     @staticmethod
-    def d_rank(tweets, max_iterations, tweet_count, weight_factor=0.2, standard=True, debug=False):
+    def d_rank(tweets, parser, max_iterations, tweet_count, weight_factor=0.2, debug=False):
 
         damping_factor = 1 - weight_factor
         interesting_delta = 0.001   # redo scores if new value differs by this
@@ -532,7 +506,7 @@ class TwitterAnalysis:
         if debug:
             print("[INFO] Tweets to consider: %d" % len(tweets_to_consider))
         TwitterAnalysis.gather_interactions(
-            tweets_to_consider, users, users_who_mentioned_x, users_mentioned_by_x, standard
+            tweets_to_consider, users, users_who_mentioned_x, users_mentioned_by_x, parser
         )
 
         # Step 1. Set all weights

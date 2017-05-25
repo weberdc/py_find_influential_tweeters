@@ -1,4 +1,4 @@
 #!/bin/bash
 
 BINPATH=`dirname $0`
-python "$BINPATH/../twitter_analysis/main.py" $@
+python3 "$BINPATH/../twitter_analysis/main.py" $@
