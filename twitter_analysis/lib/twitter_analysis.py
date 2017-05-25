@@ -287,22 +287,11 @@ class TwitterAnalysis:
     def analyse(self, tweets):
         print("Loaded %d tweets..." % len(tweets))
 
-        # user -> Kudos instance(mentions, retweets, quotes)
+        # user -> Kudos instance(mentions, retweets, quotes, ...)
         kudos = {}
         how_few = 20  # top X to report on
 
-        all_tweets = {}  # fleshed out collection of unique tweets, including embedded tweets
-        for t in tweets:
-            t_id = t['id_str']
-            all_tweets[t_id] = t
-            if self.is_a_quote(t):
-                quoted_tweet = t['quoted_status']
-                all_tweets[quoted_tweet['id_str']] = quoted_tweet
-            elif self.is_a_retweet(t):
-                retweeted_tweet = t['retweeted_status']
-                all_tweets[retweeted_tweet['id_str']] = retweeted_tweet
-
-        print("Analysing %d tweets..." % len(all_tweets))
+        print("Analysing %d tweets..." % len(tweets))
 
         def get_kudos(user_id):
             return get_or(kudos, user_id, Kudos())
@@ -310,7 +299,7 @@ class TwitterAnalysis:
         # parse all tweets and build kudos for each user
         i = 0
         import sys
-        for t in all_tweets.values():
+        for t in tweets:
             i += 1
             if self.options.debug:
                 sys.stdout.write("%2d." % i)
@@ -341,19 +330,18 @@ class TwitterAnalysis:
                 #
                 # - If @A retweets @B's quote of @C, then we get @A RETWEETS @B, and @B QUOTES @C.
                 # - If @A quotes @B's retweet of @C, then we get @A quotes @C only.
-                quoted_tweet = t
+                quoted_tweet = t['quoted_status']
                 if is_a_retweet:
                     quoted_tweet = t['retweeted_status']
 
-                quoted_tweet = t['quoted_status']
                 quoted_user = quoted_tweet['user']['screen_name']
                 quoted_tweet_id = quoted_tweet['id_str']
                 get_kudos(quoted_user).add_quote(tweeting_user, quoted_tweet_id, quoted_tweet['id_str'])
-                t_stack.append(quoted_tweet)  # quoting_tweet)
+                t_stack.append(quoted_tweet)
                 self.debug("QUOTE:   @%s quoted tweet by @%s: %s" % (tweeting_user, quoted_user, tweet_text))
             t_stack = [x for x in t_stack if (self.has_mentions(x))]  # look for those containing mentions
             if len(t_stack):
-                for _t in t_stack:  # [x for x in t_stack if (self.has_mentions(x))]:
+                for _t in t_stack:
                     for mentioned_user in _t['entities']['user_mentions']:
                         mentioned_sn = mentioned_user['screen_name']
                         if mentioned_user['id_str'] == _t['in_reply_to_user_id_str']:
@@ -433,7 +421,7 @@ class TwitterAnalysis:
             print("  @%s : %.2f" % (r[0], r[1].pa_ratio(rt_w, qu_w, re_w, fav_w)))
 
         print("D-Rank")
-        d_rank_scores = self.d_rank(all_tweets.values(),
+        d_rank_scores = self.d_rank(tweets,  # .values(),
                                     int(self.options.max_iterations),
                                     int(self.options.tweet_count),
                                     float(self.options.d_rank_weight_factor),
@@ -448,30 +436,45 @@ class TwitterAnalysis:
     def gather_interactions(tweets, users, incoming, outgoing):
         # tweets: list of parsed tweets
         # users: set of users to populate with usernames seen in tweets
-        # incoming: { mentioned_user: { mentioning_user : set(mentioning_tweet_ID) } }
+        # incoming: { mentioned_user: { mentioning_user : [mentioning_tweet_ID] } } -- possible duplicates from RTs/Qus
         # outgoing: { mentioning_user: set(mentioned_user) }
-        for t in tweets:
-            if TwitterAnalysis.is_a_quote(t):
-                quoting_user = t['user']['screen_name']
-                quoted_user = t['quoted_status']['user']['screen_name']
+        def link(interactee, interactor, tweet_id):
+            incoming_for_user_a = get_or(incoming, interactee, {})
+            get_or(incoming_for_user_a, interactor, []).append(tweet_id)
+            get_or(outgoing, interactor, set()).add(interactee)
+            users.add(interactor)
+            users.add(interactee)
 
-                incoming_for_the_quoted_user = get_or(incoming, quoted_user, {})
-                get_or(incoming_for_the_quoted_user, quoting_user, set()).add(t['id_str'])
-                get_or(outgoing, quoting_user, set()).add(quoted_user)
-                users.add(quoting_user)
-                users.add(quoted_user)
+        def process_tweet(tweet):
+            if TwitterAnalysis.is_a_quote(tweet):
+                quoting_user = tweet['user']['screen_name']
+                quoted_user = tweet['quoted_status']['user']['screen_name']
 
-            if TwitterAnalysis.has_mentions(t):
+                link(quoted_user, quoting_user, tweet['id_str'])
+
+                quoted_tweet = tweet['quoted_status']
+                process_tweet(quoted_tweet)
+
+                # if someone is mentioned in the quoted status, then the quoter and the mentionee are also linked
+                if TwitterAnalysis.has_mentions(quoted_tweet):
+                    for mention in quoted_tweet['entities']['user_mentions']:
+                        mentioned_user = mention['screen_name']
+
+                        link(mentioned_user, quoting_user, tweet['id_str'])
+
+            if TwitterAnalysis.is_a_retweet(tweet):
+                process_tweet(t['retweeted_status'])
+
+            if TwitterAnalysis.has_mentions(tweet):
                 # covers RTs, replies and mentions
-                for mention in t['entities']['user_mentions']:
+                for mention in tweet['entities']['user_mentions']:
                     mentioned_user = mention['screen_name']
-                    mentioning_user = t['user']['screen_name']
+                    mentioning_user = tweet['user']['screen_name']
 
-                    incoming_for_the_mentioned_user = get_or(incoming, mentioned_user, {})
-                    get_or(incoming_for_the_mentioned_user, mentioning_user, set()).add(t['id_str'])
-                    get_or(outgoing, mentioning_user, set()).add(mentioned_user)
-                    users.add(mentioning_user)
-                    users.add(mentioned_user)
+                    link(mentioned_user, mentioning_user, tweet['id_str'])
+
+        for t in tweets:
+            process_tweet(t)
 
     @staticmethod
     def d_rank(tweets, max_iterations, tweet_count, weight_factor=0.2, debug=False):
@@ -497,34 +500,54 @@ class TwitterAnalysis:
         scores_have_changed = True
         while iterations < max_iterations and scores_have_changed:
             scores_have_changed = False
+            new_influence_scores = {}
             iterations += 1
-            for this_user in users:
-                # grab the previous new_score and call it prev_score
-                prev_score = influence_scores[this_user]
+            if debug:
+                print("\n=== Iteration %d ===" % iterations)
+            for this_user in sorted(users):
+                # grab the previous new_score and call it old_score
+                old_score = influence_scores[this_user]
 
                 # calculate surrounding influence, accounting for own interactions (mentions of others)
                 surrounding_influence = 0.0
                 inspired_users = get_or(users_who_mentioned_x, this_user, {}).keys()
                 for inspired_user in inspired_users:
                     # how many people, in total, received a mention or RT from this inspired user?
-                    all_outgoing_interactions_of_this_inspired_user = \
+                    unique_recipients_of_outgoing_interactions_of_this_inspired_user = \
                         len(get_or(users_mentioned_by_x, inspired_user, []))
 
                     influence_of_inspired_user = influence_scores[inspired_user]
                     num_interactions_from_inspired_user = len(users_who_mentioned_x[this_user][inspired_user])
 
+                    if debug:
+                        print("    inspired user: %s %.3f" % (inspired_user, influence_of_inspired_user))
+                        print("    num interactions to this user: %2d: %s" %
+                              (num_interactions_from_inspired_user, users_who_mentioned_x[this_user][inspired_user]))
+                        print("    total interactions: %2d" %
+                              unique_recipients_of_outgoing_interactions_of_this_inspired_user)
+                        print("    -> %.2f" % (
+                              (influence_of_inspired_user * num_interactions_from_inspired_user)
+                              / unique_recipients_of_outgoing_interactions_of_this_inspired_user))
+
                     surrounding_influence += \
                         (influence_of_inspired_user * num_interactions_from_inspired_user) \
-                        / all_outgoing_interactions_of_this_inspired_user
+                        / unique_recipients_of_outgoing_interactions_of_this_inspired_user
 
                 # the next score is...
+                if debug:
+                    print("  surrounding influence: %.3f" % surrounding_influence)
                 new_score = damping_factor + weight_factor * surrounding_influence
 
                 # Step 3. check if it's changed
-                if abs(prev_score - new_score) > interesting_delta:
+                if abs(old_score - new_score) > interesting_delta:
                     scores_have_changed = True
 
-                influence_scores[this_user] = new_score
+                if debug:
+                    print("@%s %.3f -> %.3f" % (this_user, old_score, new_score))
+                new_influence_scores[this_user] = new_score
+
+            # commit the new scores
+            influence_scores = new_influence_scores
 
         if debug and iterations == max_iterations:
             print("[INFO] D-rank hit iteration max of %d. Could have continued." % max_iterations)

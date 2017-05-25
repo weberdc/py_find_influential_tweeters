@@ -102,7 +102,7 @@ The expected output from is:
 |SNP|1|0.08|0|
 |Mixture|1|0.11|0|
 |PAr|2.55|0|0|
-|D-rank|3.45|1.49|0.8|
+|D-rank|4.06|2.5|0.8|
 
 **NB** Users who do not interact with any other users (i.e. their tweets include no mentions, retweets
 or quotes) will not have a D-Rank value. It can be assumed to be zero. Same with h-index values.
