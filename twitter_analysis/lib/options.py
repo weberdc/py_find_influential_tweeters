@@ -21,7 +21,7 @@ class Options:
         self.parser = ArgumentParser(usage=usage)
         self.parser.add_argument('-i',
                                  '--input-file',
-                                 default='data/tweets.json',
+                                 default='data/test.json',
                                  dest='tweets_file',
                                  help='A file of tweets, one JSON object per line')
         self.parser.add_argument('-x',
