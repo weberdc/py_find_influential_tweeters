@@ -24,7 +24,7 @@ to measure the amount of activity inspired by tweets against the number of tweet
 corpus). I used 1, 2, 3, 1 as the default values for weights for retweets, quotes, replies and
 favourites respectively.
 
- * _PAr_ = `(RT_weight * log(|retweets|) + QU_weight * log(|quotes|) + RE_weight * log(|replies|) + FAV_weight * log(|favourited|) / |tweets posted|`
+ * _PAr_ = `(RT_weight * log(|retweets|) + QU_weight * log(|quotes|) + RE_weight * log(|replies|) + FAV_weight * log(|favourited|)) / |tweets posted|`
 
 Also included is a modification of the Duan-rank PageRank variant algorithm from a paper:
 
