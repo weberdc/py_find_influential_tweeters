@@ -38,12 +38,37 @@ valuable, which may not be the case.
 
 # Usage
 <pre>
-$ bin/py_twitter_analysis
+$ bin/twitter_analysis -h
+usage: bin/py_twitter_analysis
     -i|--input-file &lt;tweets_file.json&gt;  : File of tweets, one per line
     [-x|--max-iterations &lt;max loops&gt;]   : D-rank iteration roof value (default: 20)
     [-w|--weight &lt;weight factor value&gt;] : D-rank weighting factor (default: 0.2)
-    [-c|--count &lt;tweet_count_limit&gt;]    : Only consider up to this many tweets (default: -1, all)
-    [-v|--verbose]                      : Verbose debugging flag
+    [-c|--count &lt;tweet_count_limit&gt;]    : Consider up to this many tweets (default: -1 = all)
+    [--rt_weight &lt;rt_weight&gt;]           : PA weighting for retweets (default: 1.0)
+    [--qu_weight &lt;qu_weight&gt;]           : PA weighting for quote (default: 2.0)
+    [--re_weight &lt;re_weight&gt;]           : PA weighting for replies (default: 3.0)
+    [--fav_weight &lt;fav_weight&gt;]         : PA weighting for favourites (default: 1.0)
+    [-v|--verbose]                      : Verbose debugging flag (default: off)
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -i TWEETS_FILE, --input-file TWEETS_FILE
+                        A file of tweets, one JSON object per line
+  -x MAX_ITERATIONS, --max-iterations MAX_ITERATIONS
+                        Maximum number of iterations for Duan-rank calculation
+  -w D_RANK_WEIGHT_FACTOR, --weight D_RANK_WEIGHT_FACTOR
+                        Weight factor value for Duan-rank calculation
+  -c TWEET_COUNT, --count TWEET_COUNT
+                        Limit the tweets to consider to this many
+  -v, --verbose         Turns verbose logging on
+  --rt-weight RT_WEIGHT
+                        Post/Activity ratio weighting for retweets
+  --qu-weight QU_WEIGHT
+                        Post/Activity ratio weighting for quotes
+  --re-weight RE_WEIGHT
+                        Post/Activity ratio weighting for replies
+  --fav-weight FAV_WEIGHT
+                        Post/Activity ratio weighting for favourites
 </pre>
 
 # Test Data
@@ -111,3 +136,11 @@ The JSON for the tweets in `test.json` aren't as populated as tweets that are de
 I only included the fields and values that the code required, though I also included some fields that
 were required by another analysis programme, separate from this project. The extra fields, of course,
 don't affect the operation of this code, as they're simply ignored.
+
+There are two other test files:
+
+ * `qanda-100.json`: 100 tweets collected directly from Twitter's API relating to an Australian
+   Broadcasting Corporation (ABC) panel discussion show called Q&A.
+ * `twitter4j-100.json`: 100 tweets (mostly in languages other than English) serialised from Twitter4j
+   (Java) objects using the Jackson JSON serialisation library. They're pretty similar to standard
+   tweets but have some notable differences in structure and property names.
