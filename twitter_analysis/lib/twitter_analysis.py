@@ -1,5 +1,4 @@
 import unicodedata
-# import operator
 
 from .tweet_parsers import StandardParser, Twitter4JParser
 
@@ -261,6 +260,22 @@ class Kudos:
 
 
 class TwitterAnalysis:
+    """
+    App which calculates a number of metrics concerning a number of provided tweets. These include:
+      * Retweet/Mention(Reply) Ratio, of how many retweets, quotes and replies are generated for
+        the number of tweets posted.
+      * Interactor Ratio, of how many individuals are inspired to interact with a user given the number
+        of followers they have.
+      * Social Network Potential (based on the above two metrics), 0.25 * Ir + 0.75 RMr
+      * H-Index (a variant), how many tweets were posted and retweeted and quoted the same number of times
+      * A mixture model based on H-Index, Retweet/Mention Ratio and Interactor Ratio
+      * A Post/Activity Ratio, how many activities were generated for the number of posts
+      * Duan Rank (a PageRank variant), considers the strength of links between accounts as the number of
+        specific interactions with that individual compared with the number of individuals interacted with.
+
+    For more detail (including the papers these metrics are based on), see the README.md file.
+    The Post/Activity metric is my own (devised with the help of friends).
+    """
 
     def __init__(self, options):
         self.options = options
@@ -285,6 +300,7 @@ class TwitterAnalysis:
         # parse all tweets and build kudos for each user
         i = 0
         import sys
+        parser = None
         for t in tweets:
             i += 1
             if i % (num_tweets / 10) == 0:
@@ -362,9 +378,9 @@ class TwitterAnalysis:
                             if parser.is_a_quote(_t):
                                 quoted_author_id = parser.get_id(parser.get_quoted_status(_t)['user'])
 
-                            if (not (parser.is_a_retweet(_t) and mentioned_user_id == retweeted_author_id) and
-                                    not (parser.is_a_quote(_t) and mentioned_user_id == quoted_author_id)):
-                                _t_id = parser.get_id(_t)  # _t['id_str'] if standard else _t['id']
+                            if not (parser.is_a_retweet(_t) and mentioned_user_id == retweeted_author_id) and \
+                               not (parser.is_a_quote(_t) and mentioned_user_id == quoted_author_id):
+                                _t_id = parser.get_id(_t)
                                 get_kudos(mentioned_sn).add_mention(tweeting_user, _t_id)
                                 get_kudos(mentioned_sn).update_screen_name(mentioned_sn)
                                 self.debug("MENTION: @%s mentioned by @%s: %s" %

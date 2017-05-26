@@ -1,4 +1,9 @@
 class StandardParser:
+    """
+    Given a dictionary populated from parsing the JSON of tweets provided by the
+    Twitter API, this parser will interrogate the dictionary using the appropriate
+    field/key names.
+    """
 
     def is_a_retweet(self, t):
         return 'retweeted_status' in t
@@ -47,6 +52,13 @@ class StandardParser:
 
 
 class Twitter4JParser(StandardParser):
+    """
+    Given a dictionary populated from parsing the JSON of tweets serialised by using
+    the Twitter4J Java library (when, say, the Jackson JSON library is used to serialise
+    the Tweet JavaBeans that Twitter4J uses), this parser will interrogate the
+    dictionary using the expected field/key names (which differ from the standard
+    Twitter API ones).
+    """
 
     def is_a_retweet(self, t):
         return 'retweetedStatus' in t and t['retweetedStatus']
