@@ -458,8 +458,6 @@ class TwitterAnalysis:
         for r in d_rank_top_few:
             print("  @%s : %.2f" % (r[0], r[1]))
 
-        print("Done.")
-
     @staticmethod
     def gather_interactions(tweets, users, incoming, outgoing, parser):
         # tweets: list of parsed tweets
