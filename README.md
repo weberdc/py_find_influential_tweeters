@@ -1,5 +1,5 @@
-# py\_twitter\_analysis
-An experimental project to analyse tweet data, specifically looking for signs of *"influence"*.
+# py\_find\_influential\_tweeters
+An experimental project to analyse tweet data, specifically looking for signs of *"influence"*, in the form of influential accounts or users.
 
 Current metrics generated are a variant on the academic h-index, an interactor ratio, a
 retweet/mention ratio (more of a retweet/reply ratio really), a mixture model of retweeter/mention
